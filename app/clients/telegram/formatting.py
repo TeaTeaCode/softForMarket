@@ -118,12 +118,20 @@ def fmt_unified_order_msg(
     ]
 
     if status_info:
-        st = str(status_info.get("status", "")).strip()
-        ch = str(status_info.get("charge", "")).strip()
-        rm = str(status_info.get("remains", "")).strip()
-        sc = str(status_info.get("start_count", "")).strip()
-        cur = str(status_info.get("currency", "")).strip()
-        lines.append(f"<b>Статус поставщика:</b> {st} | charge={ch} {cur} | remains={rm} | start={sc}")
+        parts = [str(status_info.get("status", "")).strip() or "—"]
+        total = status_info.get("total_count")
+        completed = status_info.get("completed_count")
+        remaining = status_info.get("remaining_count")
+        if total is not None and completed is not None:
+            parts.append(f"выполнено {completed} из {total}")
+        if remaining not in (None, 0, "0"):
+            parts.append(f"осталось {remaining}")
+        # TeaTeaGram (старые заказы): поля добавляем только если они есть
+        for key, label in (("charge", "charge"), ("remains", "remains"), ("start_count", "start")):
+            val = str(status_info.get(key, "") or "").strip()
+            if val:
+                parts.append(f"{label}={val}")
+        lines.append(f"<b>Статус поставщика:</b> {' | '.join(parts)}")
 
     return "\n".join(lines) + "\n"
 
