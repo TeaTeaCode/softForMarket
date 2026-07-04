@@ -7,7 +7,7 @@ from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.platforms.ggsel import ggsel
-from app.clients.suppliers.teateagram import teateagram
+from app.clients.suppliers.smm_panel import smm_panel
 from app.clients.telegram import formatting as fmt
 from app.clients.telegram.client import telegram
 from app.core.config.settings import settings
@@ -40,7 +40,7 @@ def _is_status_ok(status_obj: Any) -> bool:
         if isinstance(status_obj, dict):
             st = str(status_obj.get("status", "")).strip().lower()
             is_error = bool(status_obj.get("error")) or ("error" in st)
-            if is_error or st in {"canceled", "cancelled", "refunded", "refund", "failed", "error", "partial"}:
+            if is_error or st in {"canceled", "cancelled", "refunded", "refund", "failed", "error", "partial", "paused"}:
                 return False
     except (AttributeError, TypeError):
         return False
@@ -79,7 +79,7 @@ async def _status_check(
 ) -> None:
     try:
         await asyncio.sleep(settings.STATUS_CHECK_DELAY_SECONDS)
-        status = await teateagram.get_supplier_status(str(order_id))
+        status = await smm_panel.get_supplier_status(str(order_id))
         async with async_session() as session:
             await repo.update_supplier_by_ucode(session, unique_code, json.dumps(status, ensure_ascii=False))
             msg = fmt.fmt_unified_order_msg(

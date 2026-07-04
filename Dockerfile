@@ -20,9 +20,8 @@ COPY ./app /app/app
 COPY ./alembic /app/alembic
 COPY ./alembic.ini /app/alembic.ini
 COPY ./config /app/config
+COPY ./scripts /app/scripts
 
 EXPOSE 8000
 
-# Web. Фоновые задачи (поллер чатов) — отдельный сервис worker в compose.
-# WORKERS можно масштабировать: поллер не дублируется, отложенные проверки статуса per-request.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${WORKERS:-2} --proxy-headers --forwarded-allow-ips='*'"]
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${WORKERS:-2} --proxy-headers --forwarded-allow-ips='*'"]

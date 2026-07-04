@@ -120,7 +120,7 @@ def extract_days_and_link(options: Any) -> tuple[int | None, str | None]:
     return days, link
 
 
-def _service_for_days(days: int) -> int:
+def _service_for_days(days: int) -> str:
     days_to_service = config.services.days_to_service
     if days in days_to_service:
         return days_to_service[days]
@@ -129,8 +129,8 @@ def _service_for_days(days: int) -> int:
     return days_to_service[greater[0] if greater else candidates[-1]]
 
 
-def resolve_service(platform: str, goods_id: str, days: int | None) -> int | None:
-    """platform: 'ggsel' | 'plati'. Возвращает service_id поставщика или None."""
+def resolve_service(platform: str, goods_id: str, days: int | None) -> str | None:
+    """platform: 'ggsel' | 'plati'. Возвращает service_name поставщика или None."""
     p = platform.lower().strip()
     fixed = config.services.fixed_product_to_service.get(p, {}).get(str(goods_id))
     if fixed:

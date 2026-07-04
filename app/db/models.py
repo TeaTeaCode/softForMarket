@@ -22,6 +22,7 @@ class Purchase(Base):
     tg_link: Mapped[str | None] = mapped_column(String)
     days: Mapped[int | None] = mapped_column(Integer)
     quantity: Mapped[int | None] = mapped_column(Integer)
+    supplier: Mapped[str | None] = mapped_column(String)  # 'teateagram' | 'smm_panel'
     supplier_order_id: Mapped[str | None] = mapped_column(String)
     supplier_status: Mapped[str | None] = mapped_column(String)
     status: Mapped[str | None] = mapped_column(String)

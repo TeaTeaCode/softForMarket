@@ -72,6 +72,8 @@ def status_header_ru(status_json: dict[str, Any] | None) -> str:
         return "✅ ЗАКАЗ ВЫПОЛНЕН"
     if status in {"partial"}:
         return "⚠️ ЗАКАЗ ВЫПОЛНЕН ЧАСТИЧНО"
+    if status in {"paused"}:
+        return "⏸️ ЗАКАЗ ПРИОСТАНОВЛЕН"
     if status in {"pending", "inprogress", "in progress", "processing", "progress", "working"} or not status:
         return "👌 ЗАКАЗ В ПРОЦЕССЕ ВЫПОЛНЕНИЯ"
     return f"ℹ️ СТАТУС: {status_raw or 'Неизвестен'}"
@@ -139,7 +141,7 @@ def fmt_failure_msg(
     link: str | None = None,
     days: int | None = None,
     quantity: int | None = None,
-    service_id: int | None = None,
+    service_id: str | int | None = None,
 ) -> str:
     opts_block = options_to_lines(options)
     currency = str(p.get("type_curr") or p.get("currency_type") or "")

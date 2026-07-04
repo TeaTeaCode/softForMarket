@@ -21,12 +21,12 @@ class LoggingConfig(BaseModel):
 class ServicesConfig(BaseModel):
     # goods_id площадки → человекочитаемое название товара
     goods_human: dict[str, str]
-    # площадка → {goods_id с фиксированным сроком → service_id поставщика}
-    fixed_product_to_service: dict[str, dict[str, int]]
+    # площадка → {goods_id с фиксированным сроком → service_name поставщика}
+    fixed_product_to_service: dict[str, dict[str, str]]
     # площадка → набор goods_id с выбором срока (диапазон 1–180 дней)
     range_products: dict[str, set[str]]
-    # количество дней → service_id поставщика
-    days_to_service: dict[int, int]
+    # количество дней → service_name поставщика
+    days_to_service: dict[int, str]
     # площадка → footer на странице статуса
     footer_by_platform: dict[str, str]
 

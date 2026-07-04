@@ -13,7 +13,7 @@ FastAPI (async) · SQLAlchemy 2.0 + asyncpg (PostgreSQL) · Alembic · httpx · 
 ```
 app/
   api/v1/routes/      # ggsel, digiseller, status, misc (health, /)
-  clients/            # внешние API: telegram, suppliers/teateagram, platforms/ggsel|digiseller (BaseApi)
+  clients/            # внешние API: telegram, suppliers/smm_panel|teateagram, platforms/ggsel|digiseller (BaseApi)
   core/config/        # settings (.env) + services.yaml (каталог товаров)
   db/                 # models, repository, session (engine)
   services/           # links (парсеры), orders (оркестратор), background (asyncio-задачи)
@@ -27,15 +27,18 @@ config/               # config.yaml (логи), services.yaml (товары→у
 ## Конфигурация
 
 Все настройки — в `.env` (см. `.env.example`). Секреты: токены Telegram/GGSEL/Digiseller/TeaTeaGram,
-SOCKS5-прокси для Telegram, доступ к PostgreSQL. Каталог товаров — в `config/services.yaml`.
+ключ SMM Panel (`SMM_PANEL_API_KEY`), SOCKS5-прокси для Telegram, доступ к PostgreSQL.
+Каталог товаров — в `config/services.yaml` (маппинг на `service_name` поставщика SMM Panel).
 
 ## Запуск (Docker)
 
 ```bash
 cp .env.example .env        # заполнить значения
-alembic upgrade head        # миграции выполняются вручную (схема marketplace)
 docker compose up -d --build
 ```
+
+Миграции применяются автоматически при старте сервиса **app** (`alembic upgrade head`
+перед uvicorn, зашито в CMD образа). Worker миграции не гоняет — ждёт готовую схему.
 
 Сервисы:
 - **app** — web (uvicorn, порт 80→8000). Масштаб через `WORKERS` (по умолчанию 2).

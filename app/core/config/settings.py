@@ -43,8 +43,12 @@ class Settings(BaseSettings):
     DIGI_SELLER_ID: str
     DIGI_API_KEY: SecretStr
 
-    # Поставщик TeaTeaGram
+    # Поставщик TeaTeaGram (оставлен для статусов старых заказов)
     TEA_API_KEY: SecretStr
+
+    # Поставщик SMM Panel
+    SMM_PANEL_BASE_URL: str
+    SMM_PANEL_API_KEY: SecretStr
 
     # Поведение
     AUTO_MARK_DELIVERED: bool

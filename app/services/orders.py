@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.platforms.digiseller import digiseller
 from app.clients.platforms.ggsel import ggsel
-from app.clients.suppliers.teateagram import teateagram
+from app.clients.suppliers.smm_panel import smm_panel
 from app.clients.telegram import formatting as fmt
 from app.clients.telegram.client import telegram
 from app.core.config.config import config
@@ -80,7 +80,7 @@ async def process_ggsel(session: AsyncSession, unique_code: str) -> str:
             )
             return unique_code
 
-        supplier = await teateagram.create_supplier_order(service_id, str(norm_link), quantity)
+        supplier = await smm_panel.create_supplier_order(service_id, str(norm_link), quantity)
         order_id = str(supplier.get("order"))
         purchase = _purchase_fields(data, goods_id)
         await repo.insert_purchase(
@@ -176,7 +176,7 @@ async def process_digiseller(session: AsyncSession, unique_code: str) -> str:
             await _finish_inv(session, inv)
             return unique_code
 
-        supplier = await teateagram.create_supplier_order(service_id, str(norm_link), quantity)
+        supplier = await smm_panel.create_supplier_order(service_id, str(norm_link), quantity)
         order_id = supplier.get("order") or supplier.get("order_id") or supplier.get("id")
         if not order_id:
             err = "Поставщик не вернул order_id"
@@ -306,6 +306,7 @@ def _purchase_row(
         "tg_link": str(link or "—"),
         "days": int(days) if days else None,
         "quantity": quantity,
+        "supplier": "smm_panel" if order_id else None,
         "supplier_order_id": order_id,
         "supplier_status": None,
         "status": status,

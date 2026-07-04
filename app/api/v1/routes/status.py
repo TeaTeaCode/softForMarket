@@ -8,6 +8,7 @@ from fastapi.templating import Jinja2Templates
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.clients.suppliers.smm_panel import smm_panel
 from app.clients.suppliers.teateagram import teateagram
 from app.clients.telegram.formatting import footer_for_platform, supplier_canceled
 from app.core.config.config import config
@@ -34,7 +35,7 @@ def _human_status(status_obj: Any) -> tuple[str, int | None]:
     """Человекочитаемый статус и остаток для клиента."""
     remains: int | None = None
     if isinstance(status_obj, dict):
-        for key in ("remains", "remain", "left", "remaining"):
+        for key in ("remains", "remain", "left", "remaining", "remaining_count"):
             if key in status_obj:
                 try:
                     remains = int(float(str(status_obj[key])))
@@ -48,6 +49,8 @@ def _human_status(status_obj: Any) -> tuple[str, int | None]:
             return "Завершён", 0
         if st in {"partial"}:
             return "Частично выполнен", remains
+        if st in {"paused"}:
+            return "Приостановлен. Если статус не меняется — напишите в поддержку.", remains
         if st in {"processing", "in progress", "progress", "working", "pending"}:
             return "В работе", remains
         if st:
@@ -96,8 +99,9 @@ async def status_view(
     order_id = str(row.get("supplier_order_id") or "").strip()
 
     if order_id and not _is_final(st_obj):
+        supplier = smm_panel if str(row.get("supplier") or "") == "smm_panel" else teateagram
         try:
-            fresh = await teateagram.get_supplier_status(order_id)
+            fresh = await supplier.get_supplier_status(order_id)
             await repo.update_supplier_by_ucode(session, code, json.dumps(fresh, ensure_ascii=False))
             st_obj = fresh
         except Exception as e:
