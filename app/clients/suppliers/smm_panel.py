@@ -17,6 +17,7 @@ class SmmPanelApi(BaseApi):
         payload = {"url": link, "service_name": service_name, "total_count": quantity}
         logger.info(f"[SUPPLIER] add service={service_name} link={link} qty={quantity}")
         data: dict[str, Any] = await self.request("POST", "/smm-panel/orders", json_data=payload)
+        logger.info(f"[SUPPLIER] ответ на add: {data}")
         if "id" not in data:
             raise RuntimeError(f"Поставщик не принял заказ: {data}")
         # "order" — для совместимости с кодом, ждущим формат TeaTeaGram

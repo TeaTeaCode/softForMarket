@@ -73,6 +73,10 @@ class BaseApi:
             try:
                 r = await self._client.request(method, url, params=params, json=json_data, data=data, headers=headers)
                 if r.status_code in RETRY_STATUSES and attempt < RETRY_TOTAL:
+                    logger.warning(
+                        f"Ретрай {attempt + 1}/{RETRY_TOTAL}: {method} {url} -> "
+                        f"{r.status_code} {r.text[:200]}"
+                    )
                     last_response = r
                     await asyncio.sleep(RETRY_BACKOFF * (2**attempt))
                     continue
@@ -86,6 +90,7 @@ class BaseApi:
                 raise
             except (httpx.TransportError, httpx.TimeoutException) as exc:
                 if attempt < RETRY_TOTAL:
+                    logger.warning(f"Ретрай {attempt + 1}/{RETRY_TOTAL}: {method} {url} -> {type(exc).__name__}: {exc}")
                     await asyncio.sleep(RETRY_BACKOFF * (2**attempt))
                     continue
                 cause = f" ({exc.__cause__!r})" if exc.__cause__ is not None else ""
