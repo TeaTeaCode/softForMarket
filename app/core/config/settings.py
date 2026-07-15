@@ -22,11 +22,9 @@ class Settings(BaseSettings):
     # CORS
     BACKEND_CORS_ORIGINS: Annotated[list[str], NoDecode]
 
-    # Logging
-    LOG_LEVEL: str
-    LOG_FILE: str
+    # Логирование настраивается в config/config.yaml (loguru), не через .env
 
-    # Публичный домен, который видят клиенты (ссылка в TG + редиректы)
+    # Публичный домен: ссылки в TG + редиректы
     BASE_PUBLIC_URL: str
 
     # Telegram (уведомления в группу)
@@ -43,24 +41,35 @@ class Settings(BaseSettings):
     DIGI_SELLER_ID: str
     DIGI_API_KEY: SecretStr
 
-    # Поставщик TeaTeaGram (оставлен для статусов старых заказов)
+    # TeaTeaGram: legacy, только статусы старых заказов
     TEA_API_KEY: SecretStr
 
     # Поставщик SMM Panel
     SMM_PANEL_BASE_URL: str
     SMM_PANEL_API_KEY: SecretStr
 
+    # Поставщик Fragment: Telegram Stars и Premium
+    FRAGMENT_BASE_URL: str
+    FRAGMENT_API_KEY: SecretStr
+
     # Поведение
     AUTO_MARK_DELIVERED: bool
     INFLIGHT_TTL_SECONDS: int
     GGSEL_CHAT_POLL_INTERVAL: int
     STATUS_CHECK_DELAY_SECONDS: int
-    # При первой встрече чата: True — проглотить историю без форварда, False — переслать (с лимитом ниже)
+    # При первой встрече чата: True — проглотить историю, False — переслать
     GGSEL_CHAT_BOOTSTRAP_SILENT: bool
-    # Сколько страниц списка чатов опрашивать за цикл
+    # Страниц списка чатов за цикл
     GGSEL_CHAT_MAX_PAGES: int
-    # Свежесть чата: тянем сообщения только если last_message не старше стольких дней
+    # Тянем чат, только если last_message не старше N дней
     GGSEL_CHAT_FRESH_DAYS: int
+
+    # Поллер статусов заказов: интервал опроса, сек
+    ORDER_POLL_INTERVAL: int
+    # Заказов за цикл
+    ORDER_POLL_BATCH: int
+    # Бросаем опрос заказа, если он старше N часов
+    ORDER_POLL_MAX_AGE_HOURS: int
 
     # База данных (PostgreSQL через asyncpg)
     POSTGRES_HOST: str

@@ -38,6 +38,18 @@ async def get_by_unique_code(session: AsyncSession, unique_code: str) -> dict[st
     return {c.name: getattr(obj, c.name) for c in Purchase.__table__.columns}
 
 
+async def get_pending_orders(session: AsyncSession, limit: int = 200) -> list[dict[str, Any]]:
+    """Заказы, принятые поставщиком: у них есть order_id, но статус мог не дойти до финала."""
+    result = await session.execute(
+        select(Purchase)
+        .where(Purchase.status == "SUPPLIER_ACCEPTED")
+        .where(Purchase.supplier_order_id.is_not(None))
+        .order_by(Purchase.id.desc())
+        .limit(limit)
+    )
+    return [{c.name: getattr(obj, c.name) for c in Purchase.__table__.columns} for obj in result.scalars().all()]
+
+
 async def update_supplier_by_ucode(
     session: AsyncSession, unique_code: str, status: str | None = None, order_id: str | None = None
 ) -> None:
@@ -104,7 +116,7 @@ async def try_acquire_inflight_inv(session: AsyncSession, inv: int) -> bool:
     result = await session.execute(select(InflightInvoice.created_at).where(InflightInvoice.inv == inv))
     created = result.scalars().first()
     if created is not None:
-        # Postgres TIMESTAMPTZ возвращает tz-aware время; на всякий случай трактуем наивное как UTC.
+        # наивное время трактуем как UTC
         if created.tzinfo is None:
             created = created.replace(tzinfo=UTC)
         age = (datetime.now(UTC) - created).total_seconds()

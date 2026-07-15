@@ -25,6 +25,8 @@ class ServicesConfig(BaseModel):
     fixed_product_to_service: dict[str, dict[str, str]]
     # площадка → набор goods_id с выбором срока (диапазон 1–180 дней)
     range_products: dict[str, set[str]]
+    # площадка → {goods_id → тип покупки Fragment: stars | premium}
+    fragment_products: dict[str, dict[str, str]]
     # количество дней → service_name поставщика
     days_to_service: dict[int, str]
     # площадка → footer на странице статуса

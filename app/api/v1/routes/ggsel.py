@@ -3,7 +3,8 @@ from fastapi.responses import PlainTextResponse, RedirectResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session
-from app.services import orders
+from app.services.orders._common import status_url
+from app.services.orders.ggsel import process_ggsel
 
 router = APIRouter()
 
@@ -13,5 +14,5 @@ async def ggsel_callback(uniquecode: str = "", unique_code: str = "", session: A
     code = (uniquecode or unique_code).strip()
     if not code:
         return PlainTextResponse("uniquecode is required", status_code=400)
-    await orders.process_ggsel(session, code)
-    return RedirectResponse(orders.status_url(code), status_code=302)
+    await process_ggsel(session, code)
+    return RedirectResponse(status_url(code), status_code=302)

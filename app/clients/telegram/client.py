@@ -13,7 +13,7 @@ def _proxy() -> str | None:
 
 
 class TelegramApi(BaseApi):
-    async def send_message(self, text: str, *, silent: bool = False) -> bool:
+    async def send_message(self, text: str, silent: bool = False) -> bool:
         payload = {
             "chat_id": settings.TG_CHAT_ID,
             "text": text,
@@ -25,7 +25,7 @@ class TelegramApi(BaseApi):
             await self.request("POST", _SEND_URL, json_data=payload)
             return True
         except Exception as e:
-            logger.exception(f"[TG] ошибка отправки: {e}")
+            logger.exception(f"[TG] ✖ ошибка отправки chat_id={settings.TG_CHAT_ID} silent={silent} text={text!r}: {e}")
             return False
 
 

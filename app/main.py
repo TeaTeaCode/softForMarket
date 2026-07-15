@@ -12,6 +12,7 @@ from starlette.responses import Response
 from app.api.v1.api import api_router
 from app.clients.platforms.digiseller import digiseller
 from app.clients.platforms.ggsel import ggsel
+from app.clients.suppliers.fragment import fragment
 from app.clients.suppliers.smm_panel import smm_panel
 from app.clients.suppliers.teateagram import teateagram
 from app.clients.telegram.client import telegram
@@ -39,11 +40,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
-    # Закрываем HTTP-клиенты интеграций
     await ggsel.close()
     await digiseller.close()
     await teateagram.close()
     await smm_panel.close()
+    await fragment.close()
     await telegram.close()
 
 

@@ -26,8 +26,15 @@ fixed_product_to_service:
 
 # площадка → goods_id с выбором срока (диапазон 1–180 дней)
 range_products:
-  ggsel: ["5431904"]
-  plati: ["5534877"]
+  ggsel: [ "5431904" ]
+  plati: [ "5534877" ]
+
+# площадка → {goods_id → тип покупки Fragment: stars | premium}
+fragment_products:
+  ggsel:
+    "102558269": "stars"     # Telegram Stars
+    "102558303": "premium"   # Telegram Premium
+  plati: {}                  # аналогов Stars/Premium на PLATI нет
 
 # количество дней → service_id поставщика
 days_to_service:

@@ -32,15 +32,15 @@ class GgselApi(BaseApi):
         logger.info(f"[GGSEL] заказ {code} получен")
         return result
 
-    async def get_chats(self, token: str, *, filter_new: int = 1, pagesize: int = 100, page: int = 1) -> dict[str, Any]:
+    async def get_chats(self, token: str, filter_new: int = 1, pagesize: int = 100, page: int = 1) -> dict[str, Any]:
         params: dict[str, Any] = {"token": token, "filter_new": filter_new, "pagesize": pagesize, "page": page}
         data = await self.request("GET", GGSEL_CHATS_URL, params=params)
         if isinstance(data, dict):
             return data
         return {"items": data if isinstance(data, list) else [], "cnt_pages": 1}
 
-    async def get_chat_messages(self, token: str, chat_id: int, *, count: int = 100) -> list:
-        # GGSEL называет идентификатор чата id_i — он же ожидается в query-параметрах
+    async def get_chat_messages(self, token: str, chat_id: int, count: int = 100) -> list:
+        # GGSEL называет идентификатор чата id_i
         params: dict[str, Any] = {"token": token, "id_i": chat_id, "count": count}
         data = await self.request("GET", GGSEL_MESSAGES_URL, params=params)
         if isinstance(data, list):

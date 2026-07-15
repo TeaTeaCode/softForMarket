@@ -8,8 +8,7 @@ from fastapi.templating import Jinja2Templates
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clients.suppliers.smm_panel import smm_panel
-from app.clients.suppliers.teateagram import teateagram
+from app.clients.suppliers.registry import fetch_status
 from app.clients.telegram.formatting import footer_for_platform, supplier_canceled
 from app.core.config.config import config
 from app.db import repository as repo
@@ -51,7 +50,7 @@ def _human_status(status_obj: Any) -> tuple[str, int | None]:
             return "Частично выполнен", remains
         if st in {"paused"}:
             return "Приостановлен. Если статус не меняется — напишите в поддержку.", remains
-        if st in {"processing", "in progress", "progress", "working", "pending"}:
+        if st in {"processing", "in progress", "progress", "working", "pending", "awaiting_balance"}:
             return "В работе", remains
         if st:
             return str(status_obj.get("status", "")).strip(), remains
@@ -99,9 +98,8 @@ async def status_view(
     order_id = str(row.get("supplier_order_id") or "").strip()
 
     if order_id and not _is_final(st_obj):
-        supplier = smm_panel if str(row.get("supplier") or "") == "smm_panel" else teateagram
         try:
-            fresh = await supplier.get_supplier_status(order_id)
+            fresh = await fetch_status(str(row.get("supplier") or ""), order_id)
             await repo.update_supplier_by_ucode(session, code, json.dumps(fresh, ensure_ascii=False))
             st_obj = fresh
         except Exception as e:
@@ -116,7 +114,7 @@ async def status_view(
         return _templates.TemplateResponse(request, "status.html", ctx)
 
     status_line, remains = _human_status(st_obj)
-    # Не финал → держим авто-обновление, чтобы клиент увидел «Завершён» без перезагрузки.
+    # не финал → авто-обновление, чтобы клиент увидел «Завершён» без перезагрузки
     if not _is_final(st_obj):
         ctx["auto_refresh"] = 30
     ctx |= {"status_line": status_line, "remains": "—" if remains is None else str(remains)}

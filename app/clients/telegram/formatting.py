@@ -74,6 +74,8 @@ def status_header_ru(status_json: dict[str, Any] | None) -> str:
         return "⚠️ ЗАКАЗ ВЫПОЛНЕН ЧАСТИЧНО"
     if status in {"paused"}:
         return "⏸️ ЗАКАЗ ПРИОСТАНОВЛЕН"
+    if status in {"awaiting_balance"}:
+        return "💰 ОЖИДАЕТ ПОПОЛНЕНИЯ БАЛАНСА"
     if status in {"pending", "inprogress", "in progress", "processing", "progress", "working"} or not status:
         return "👌 ЗАКАЗ В ПРОЦЕССЕ ВЫПОЛНЕНИЯ"
     return f"ℹ️ СТАТУС: {status_raw or 'Неизвестен'}"
@@ -182,7 +184,7 @@ def fmt_failure_msg(
 
 
 def _clean_date(s: str) -> str:
-    """'2026-04-20T01:48:17+03:00' → '2026-04-20 01:48:17' (T→пробел, без tz-суффикса)."""
+    """ISO-дата в читаемый вид: T→пробел, без tz-суффикса."""
     if not s:
         return ""
     return _TZ_SUFFIX_RE.sub("", s.replace("T", " ")).strip()

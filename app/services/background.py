@@ -7,9 +7,10 @@ from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.platforms.ggsel import ggsel
-from app.clients.suppliers.smm_panel import smm_panel
+from app.clients.suppliers.registry import fetch_status
 from app.clients.telegram import formatting as fmt
 from app.clients.telegram.client import telegram
+from app.core.config.config import config
 from app.core.config.settings import settings
 from app.db import repository as repo
 from app.db.session import async_session
@@ -28,10 +29,7 @@ def _status_url(code: str) -> str:
 
 
 def _is_status_ok(status_obj: Any) -> bool:
-    """True → заказ в порядке (тихое уведомление); False → ошибка/отмена/partial (со звуком).
-
-    Кривой/неожиданный статус трактуем как «громко» — лучше лишний звук, чем пропустить ошибку.
-    """
+    """True → тихое уведомление; False → со звуком. Неизвестный статус трактуем как громкий."""
     if not status_obj:
         return True
     try:
@@ -40,7 +38,17 @@ def _is_status_ok(status_obj: Any) -> bool:
         if isinstance(status_obj, dict):
             st = str(status_obj.get("status", "")).strip().lower()
             is_error = bool(status_obj.get("error")) or ("error" in st)
-            if is_error or st in {"canceled", "cancelled", "refunded", "refund", "failed", "error", "partial", "paused"}:
+            if is_error or st in {
+                "canceled",
+                "cancelled",
+                "refunded",
+                "refund",
+                "failed",
+                "error",
+                "partial",
+                "paused",
+                "awaiting_balance",
+            }:
                 return False
     except (AttributeError, TypeError):
         return False
@@ -59,10 +67,11 @@ def schedule_status_check(
     goods_name: str,
     options: list,
     supplier_resp: dict[str, Any],
+    supplier: str = "smm_panel",
 ) -> None:
     _track(
         asyncio.create_task(
-            _status_check(platform_name, unique_code, order_id, purchase, email, goods_name, options, supplier_resp)
+            _status_check(platform_name, unique_code, order_id, purchase, email, goods_name, options, supplier_resp, supplier)
         )
     )
 
@@ -76,12 +85,17 @@ async def _status_check(
     goods_name: str,
     options: list,
     supplier_resp: dict[str, Any],
+    supplier: str = "smm_panel",
 ) -> None:
     try:
         await asyncio.sleep(settings.STATUS_CHECK_DELAY_SECONDS)
-        status = await smm_panel.get_supplier_status(str(order_id))
+        status = await fetch_status(supplier, str(order_id))
+        logger.info(f"[BG] проверка статуса code={unique_code} supplier={supplier} order={order_id} → {status}")
         async with async_session() as session:
             await repo.update_supplier_by_ucode(session, unique_code, json.dumps(status, ensure_ascii=False))
+            # промежуточный статус не уведомляем: заказ добьёт поллер, иначе займём ключ дедупа
+            if not _is_final_status(status):
+                return
             msg = fmt.fmt_unified_order_msg(
                 platform_name,
                 unique_code,
@@ -94,10 +108,122 @@ async def _status_check(
                 _status_url(unique_code),
             )
             silent = _is_status_ok(status)
-            if await repo.try_mark_notified(session, unique_code, "success" if silent else "fail"):
+            if await repo.try_mark_notified(session, unique_code, "final"):
                 await telegram.send_message(msg, silent=silent)
     except Exception as e:
         logger.warning(f"[BG] проверка статуса не удалась code={unique_code} order={order_id}: {e}")
+
+
+# ─── поллер статусов заказов ──────────────────────────────────────────────────
+
+# статусы поставщиков, после которых опрашивать больше нечего
+FINAL_STATUSES = frozenset(
+    {"success", "completed", "done", "finished", "failed", "canceled", "cancelled", "refunded", "refund"}
+)
+
+
+def start_order_poller() -> None:
+    _track(asyncio.create_task(_order_poller()))
+
+
+async def _order_poller() -> None:
+    logger.info(f"[ORDER-POLL] поллер запущен, интервал={settings.ORDER_POLL_INTERVAL}с")
+    await asyncio.sleep(5)
+    while True:
+        try:
+            await _poll_orders_once()
+        except Exception as e:
+            logger.warning(f"[ORDER-POLL] ошибка цикла: {e}")
+        await asyncio.sleep(settings.ORDER_POLL_INTERVAL)
+
+
+def _is_final_status(status_obj: Any) -> bool:
+    if fmt.supplier_canceled(status_obj):
+        return True
+    if isinstance(status_obj, dict):
+        return str(status_obj.get("status", "")).strip().lower() in FINAL_STATUSES
+    return False
+
+
+def _is_order_stale(created_at: Any) -> bool:
+    """Заказ старше ORDER_POLL_MAX_AGE_HOURS — перестаём опрашивать."""
+    if not created_at:
+        return False
+    try:
+        created = datetime.fromisoformat(str(created_at))
+    except ValueError:
+        return False
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=UTC)
+    return created < datetime.now(UTC) - timedelta(hours=settings.ORDER_POLL_MAX_AGE_HOURS)
+
+
+async def _poll_orders_once() -> None:
+    async with async_session() as session:
+        rows = await repo.get_pending_orders(session, settings.ORDER_POLL_BATCH)
+
+    if rows:
+        logger.info(f"[ORDER-POLL] цикл: незавершённых заказов={len(rows)}")
+    for row in rows:
+        try:
+            await _poll_order(row)
+        except Exception as e:
+            logger.warning(f"[ORDER-POLL] заказ code={row.get('unique_code')}: {type(e).__name__}: {e}")
+
+
+async def _poll_order(row: dict[str, Any]) -> None:
+    unique_code = str(row.get("unique_code") or "")
+    order_id = str(row.get("supplier_order_id") or "")
+    supplier = str(row.get("supplier") or "")
+    if not unique_code or not order_id or not supplier:
+        return
+
+    saved = _safe_json(row.get("supplier_status"))
+    if _is_final_status(saved):
+        return
+    if _is_order_stale(row.get("created_at")):
+        logger.info(f"[ORDER-POLL] ⏭ заказ протух code={unique_code} created_at={row.get('created_at')}")
+        return
+
+    status = await fetch_status(supplier, order_id)
+    logger.info(f"[ORDER-POLL] статус code={unique_code} supplier={supplier} order={order_id} → {status}")
+
+    async with async_session() as session:
+        await repo.update_supplier_by_ucode(session, unique_code, json.dumps(status, ensure_ascii=False))
+        if not _is_final_status(status):
+            return
+
+        silent = _is_status_ok(status)
+        if not await repo.try_mark_notified(session, unique_code, "final"):
+            return
+
+        goods_id = str(row.get("goods_id") or "")
+        msg = fmt.fmt_unified_order_msg(
+            "GGSEL" if row.get("platform") == "ggsel" else "PLATI",
+            unique_code,
+            {"inv": row.get("inv"), "id_goods": goods_id, "amount": row.get("amount"), "type_curr": row.get("currency")},
+            str(row.get("email") or ""),
+            config.services.goods_human.get(goods_id, goods_id),
+            [],
+            {"order": order_id},
+            status,
+            _status_url(unique_code),
+        )
+        await telegram.send_message(msg, silent=silent)
+        logger.info(
+            f"[ORDER-POLL] финал code={unique_code} status={status.get('status') if isinstance(status, dict) else status}"
+        )
+
+
+def _safe_json(raw: Any) -> Any:
+    if not raw:
+        return None
+    if isinstance(raw, dict | list):
+        return raw
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return raw
 
 
 # ─── поллер чатов GGSEL ───────────────────────────────────────────────────────
@@ -186,7 +312,6 @@ async def _process_chat(session: AsyncSession, token: str, chat: dict[str, Any])
         if int(m.get("buyer") or 0) == 1 and not int(m.get("deleted") or 0):
             to_send.append((mid, m))
 
-    # При первой встрече чата с bootstrap silent проглатываем историю без форварда.
     if first_seen and settings.GGSEL_CHAT_BOOTSTRAP_SILENT:
         await repo.ggsel_chat_set_last_msg_id(session, chat_id, max_seen)
         logger.info(f"[GGSEL-CHAT] bootstrap chat_id={chat_id} last_msg_id={max_seen} (пропущено {len(to_send)} сообщений)")

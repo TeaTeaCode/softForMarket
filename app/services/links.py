@@ -4,7 +4,7 @@ from typing import Any
 from app.core.config.config import config
 
 INVALID_TG_LINK_MSG = (
-    "Указана неверная ссылка на канал. Напишите в поддержку, указав ссылку для вступления в канал. " "Мы перезапустим заказ."
+    "Указана неверная ссылка на канал. Напишите в поддержку, указав ссылку для вступления в канал. Мы перезапустим заказ."
 )
 
 _TME_RE = re.compile(r"^(?:https?://)?(?:www\.)?t\.me/(?P<path>.+)$", re.IGNORECASE)
@@ -16,7 +16,7 @@ _BOOST_RE = re.compile(r"[A-Za-z0-9_\-]{3,128}")
 
 
 def normalize_tg_link(raw: Any) -> tuple[str | None, str | None]:
-    """Принимает t.me/name | @name | +invite | joinchat/.. | boost/.. → (норм. ссылка, ошибка)."""
+    """Нормализует TG-ссылку → (ссылка, ошибка)."""
     if raw is None:
         return None, INVALID_TG_LINK_MSG
     s = str(raw).strip().replace("\\", "/").strip()
@@ -35,7 +35,6 @@ def normalize_tg_link(raw: Any) -> tuple[str | None, str | None]:
     if "/" not in s and _USERNAME_RE.match(s):
         return f"https://t.me/{s}", None
 
-    # подбираем хвост, если в строке есть t.me/
     if "t.me/" in s.lower():
         tail = s[s.lower().find("t.me/") + 5 :].split("?", 1)[0].split("#", 1)[0].strip().strip("/")
         return _validate_path(tail)
@@ -120,6 +119,48 @@ def extract_days_and_link(options: Any) -> tuple[int | None, str | None]:
     return days, link
 
 
+def extract_username(raw: Any) -> tuple[str | None, str | None]:
+    """Достаёт username из t.me/nick | @nick | nick → (username, ошибка)."""
+    if raw is None:
+        return None, INVALID_TG_LINK_MSG
+
+    s = str(raw).replace("\\", "/").strip()
+    if not s:
+        return None, INVALID_TG_LINK_MSG
+
+    if m := _TME_RE.match(s):
+        s = (m.group("path") or "").split("?", 1)[0].split("#", 1)[0]
+    elif "t.me/" in s.lower():
+        s = s[s.lower().find("t.me/") + 5 :].split("?", 1)[0].split("#", 1)[0]
+
+    s = s.strip().strip("/").lstrip("@")
+    # приватные ссылки и инвайты не содержат публичного username
+    if not s or "/" in s or s.startswith("+"):
+        return None, INVALID_TG_LINK_MSG
+    if not _USERNAME_RE.match(s):
+        return None, INVALID_TG_LINK_MSG
+    return s, None
+
+
+def extract_months(options: Any) -> int | None:
+    """Достаёт количество месяцев подписки из опций заказа."""
+    if not isinstance(options, list):
+        return None
+
+    for opt in options:
+        try:
+            name = str(opt.get("name", "")).strip().lower()
+            val = opt.get("value")
+        except AttributeError:
+            continue
+
+        if any(k in name for k in ("месяц", "month", "подписк", "subscription")):
+            parsed = _parse_days(val)
+            if parsed and parsed > 0:
+                return parsed
+    return None
+
+
 def _service_for_days(days: int) -> str:
     days_to_service = config.services.days_to_service
     if days in days_to_service:
@@ -127,6 +168,11 @@ def _service_for_days(days: int) -> str:
     candidates = sorted(days_to_service.keys())
     greater = [d for d in candidates if d >= days]
     return days_to_service[greater[0] if greater else candidates[-1]]
+
+
+def resolve_fragment_kind(platform: str, goods_id: str) -> str | None:
+    """Тип покупки Fragment для товара: 'stars' | 'premium' | None (обычный буст)."""
+    return config.services.fragment_products.get(platform.lower().strip(), {}).get(str(goods_id))
 
 
 def resolve_service(platform: str, goods_id: str, days: int | None) -> str | None:

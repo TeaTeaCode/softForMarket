@@ -30,12 +30,10 @@ class Purchase(Base):
 
 
 class Inflight(Base):
-    """Блокировка обработки заказа по unique_code (GGSEL). expires_at — unix-время."""
-
     __tablename__ = "inflight"
 
     unique_code: Mapped[str] = mapped_column(String, primary_key=True)
-    expires_at: Mapped[int] = mapped_column(Integer)
+    expires_at: Mapped[int] = mapped_column(Integer)  # unix-время
 
 
 class ProcessedInvoice(Base):
@@ -46,8 +44,6 @@ class ProcessedInvoice(Base):
 
 
 class InflightInvoice(Base):
-    """Блокировка обработки заказа по inv (Digiseller)."""
-
     __tablename__ = "inflight_invoices"
 
     inv: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -63,18 +59,14 @@ class SupplierOrder(Base):
 
 
 class Notified(Base):
-    """Анти-спам уведомлений: одно уведомление каждого вида (success/fail) на unique_code."""
-
     __tablename__ = "notified"
 
     unique_code: Mapped[str] = mapped_column(String, primary_key=True)
-    kind: Mapped[str] = mapped_column(String, primary_key=True)
+    kind: Mapped[str] = mapped_column(String, primary_key=True)  # success | fail
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.current_timestamp())
 
 
 class GgselChat(Base):
-    """Последнее пересланное сообщение чата GGSEL (для поллера)."""
-
     __tablename__ = "ggsel_chats"
 
     id_i: Mapped[int] = mapped_column(BigInteger, primary_key=True)

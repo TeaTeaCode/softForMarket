@@ -1,0 +1,218 @@
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from app.clients.suppliers import registry
+from app.clients.telegram.formatting import status_header_ru
+from app.services import background
+from app.services.orders import _common as common
+
+
+class FakeSession:
+    async def __aenter__(self):
+        return None
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+@pytest.fixture
+def sent():
+    return []
+
+
+@pytest.fixture
+def notify(sent):
+    """Прогон _notify с перехватом отправки в TG."""
+
+    async def _notify(text, silent=False, dedupe=None, already_notified=False):
+        async def send(message, silent=False):
+            sent.append((message, silent))
+            return True
+
+        with (
+            patch.object(common.repo, "try_mark_notified", AsyncMock(return_value=not already_notified)),
+            patch.object(common.telegram, "send_message", AsyncMock(side_effect=send)),
+        ):
+            await common._notify(None, text, silent=silent, dedupe=dedupe)
+
+    return _notify
+
+
+async def test_notify_sends_message(notify, sent):
+    await notify("привет")
+    assert sent == [("привет", False)]
+
+
+async def test_notify_passes_silent_flag(notify, sent):
+    await notify("тихо", silent=True)
+    assert sent == [("тихо", True)]
+
+
+async def test_notify_dedupe_blocks_repeat(notify, sent):
+    await notify("дубль", dedupe=("CODE-1", "fail"), already_notified=True)
+    assert sent == []
+
+
+async def test_notify_dedupe_allows_first_send(notify, sent):
+    await notify("первый", dedupe=("CODE-1", "fail"))
+    assert sent == [("первый", False)]
+
+
+async def test_notify_survives_telegram_failure():
+    # send_message ловит всё внутри и возвращает False — заказ не должен падать
+    with (
+        patch.object(common.repo, "try_mark_notified", AsyncMock(return_value=True)),
+        patch.object(common.telegram, "send_message", AsyncMock(return_value=False)),
+    ):
+        await common._notify(None, "текст", dedupe=("C1", "fail"))
+
+
+# ─── Фоновая проверка статуса → уведомление ──────────────────────────────────
+
+
+async def _run_status_check(supplier, status, sent):
+    async def send(message, silent=False):
+        sent.append((message, silent))
+        return True
+
+    method = "get_task_status" if supplier == "fragment" else "get_supplier_status"
+    client = getattr(registry, supplier)
+
+    with (
+        patch.object(background.settings, "STATUS_CHECK_DELAY_SECONDS", 0),
+        patch.object(client, method, AsyncMock(return_value=status)),
+        patch.object(background, "async_session", FakeSession),
+        patch.object(background.repo, "update_supplier_by_ucode", AsyncMock()),
+        patch.object(background.repo, "try_mark_notified", AsyncMock(return_value=True)),
+        patch.object(background.telegram, "send_message", AsyncMock(side_effect=send)),
+    ):
+        await background._status_check(
+            "GGSEL", "CODE-1", "order-1", {"inv": 1}, "b@x.ru", "Товар", [], {"order": "order-1"}, supplier
+        )
+
+
+@pytest.mark.parametrize(
+    "supplier,status,header,silent",
+    [
+        ("fragment", {"status": "success"}, "✅ ЗАКАЗ ВЫПОЛНЕН", True),
+        ("fragment", {"status": "failed", "error_text": "нет средств"}, "❌ ЗАКАЗ ОТМЕНЁН", False),
+        ("smm_panel", {"status": "completed"}, "✅ ЗАКАЗ ВЫПОЛНЕН", True),
+        ("smm_panel", {"status": "canceled"}, "❌ ЗАКАЗ ОТМЕНЁН", False),
+        ("teateagram", {"status": "completed"}, "✅ ЗАКАЗ ВЫПОЛНЕН", True),
+    ],
+)
+async def test_status_check_notifies_on_final_status(sent, supplier, status, header, silent):
+    await _run_status_check(supplier, status, sent)
+
+    assert len(sent) == 1, "должно уйти ровно одно уведомление"
+    message, is_silent = sent[0]
+    assert message.startswith(header)
+    assert is_silent is silent
+
+
+@pytest.mark.parametrize("status", ["pending", "processing", "awaiting_balance"])
+async def test_status_check_stays_silent_on_intermediate_status(sent, status):
+    # заказ ещё в работе — уведомит поллер, когда дойдёт до финала
+    await _run_status_check("fragment", {"status": status}, sent)
+    assert sent == []
+
+
+async def test_status_check_does_not_notify_twice(sent):
+    async def send(message, silent=False):
+        sent.append((message, silent))
+        return True
+
+    with (
+        patch.object(background.settings, "STATUS_CHECK_DELAY_SECONDS", 0),
+        patch.object(registry.fragment, "get_task_status", AsyncMock(return_value={"status": "success"})),
+        patch.object(background, "async_session", FakeSession),
+        patch.object(background.repo, "update_supplier_by_ucode", AsyncMock()),
+        patch.object(background.repo, "try_mark_notified", AsyncMock(return_value=False)),  # уже слали
+        patch.object(background.telegram, "send_message", AsyncMock(side_effect=send)),
+    ):
+        await background._status_check("GGSEL", "C1", "o-1", {}, "", "", [], {}, "fragment")
+
+    assert sent == []
+
+
+async def test_order_notified_once_across_check_and_poller(sent):
+    """Разовая проверка и поллер не должны уведомить дважды по одному заказу."""
+    notified: set[tuple[str, str]] = set()
+
+    async def try_mark(session, code, kind):
+        if (code, kind) in notified:
+            return False
+        notified.add((code, kind))
+        return True
+
+    async def send(message, silent=False):
+        sent.append((message, silent))
+        return True
+
+    row = {
+        "unique_code": "CODE-1",
+        "supplier_order_id": "task-1",
+        "supplier": "fragment",
+        "supplier_status": None,
+        "platform": "ggsel",
+        "goods_id": "102558269",
+        "inv": 1,
+        "amount": 100,
+        "currency": "RUB",
+        "email": "b@x.ru",
+        "created_at": None,
+    }
+
+    with (
+        patch.object(background.settings, "STATUS_CHECK_DELAY_SECONDS", 0),
+        patch.object(background, "async_session", FakeSession),
+        patch.object(background.repo, "update_supplier_by_ucode", AsyncMock()),
+        patch.object(background.repo, "try_mark_notified", AsyncMock(side_effect=try_mark)),
+        patch.object(background.telegram, "send_message", AsyncMock(side_effect=send)),
+        patch.object(background.repo, "get_pending_orders", AsyncMock(return_value=[row])),
+    ):
+        # 1) разовая проверка застала промежуточный статус — молчит
+        with patch.object(registry.fragment, "get_task_status", AsyncMock(return_value={"status": "processing"})):
+            await background._status_check("GGSEL", "CODE-1", "task-1", {}, "", "Товар", [], {}, "fragment")
+        assert sent == []
+
+        # 2) поллер видит финал — уведомляет один раз
+        with patch.object(registry.fragment, "get_task_status", AsyncMock(return_value={"status": "failed"})):
+            await background._poll_orders_once()
+        assert len(sent) == 1
+        assert sent[0][0].startswith("❌ ЗАКАЗ ОТМЕНЁН")
+
+        # 3) следующий цикл поллера не дублирует
+        with patch.object(registry.fragment, "get_task_status", AsyncMock(return_value={"status": "failed"})):
+            await background._poll_orders_once()
+        assert len(sent) == 1
+
+
+async def test_status_check_failure_does_not_crash():
+    # упавший опрос статуса не должен ронять фоновую задачу
+    with (
+        patch.object(background.settings, "STATUS_CHECK_DELAY_SECONDS", 0),
+        patch.object(registry.fragment, "get_task_status", AsyncMock(side_effect=RuntimeError("сеть"))),
+    ):
+        await background._status_check("GGSEL", "C1", "o-1", {}, "", "", [], {}, "fragment")
+
+
+# ─── Заголовки статусов ──────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "status,expected",
+    [
+        ({"status": "success"}, "✅ ЗАКАЗ ВЫПОЛНЕН"),
+        ({"status": "failed"}, "❌ ЗАКАЗ ОТМЕНЁН"),
+        ({"status": "awaiting_balance"}, "💰 ОЖИДАЕТ ПОПОЛНЕНИЯ БАЛАНСА"),
+        ({"status": "pending"}, "👌 ЗАКАЗ В ПРОЦЕССЕ ВЫПОЛНЕНИЯ"),
+        ({"status": "processing"}, "👌 ЗАКАЗ В ПРОЦЕССЕ ВЫПОЛНЕНИЯ"),
+        ({"status": "partial"}, "⚠️ ЗАКАЗ ВЫПОЛНЕН ЧАСТИЧНО"),
+        ({"status": "paused"}, "⏸️ ЗАКАЗ ПРИОСТАНОВЛЕН"),
+        (None, "👌 ЗАКАЗ В ПРОЦЕССЕ ВЫПОЛНЕНИЯ"),
+    ],
+)
+def test_status_header(status, expected):
+    assert status_header_ru(status) == expected
