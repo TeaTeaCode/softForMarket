@@ -14,15 +14,15 @@ async def ggsel_callback(uniquecode: str = "", unique_code: str = "", session: A
     return await _handle(uniquecode, unique_code, session)
 
 
-# отдельные URL возврата для Fragment-товаров: тип покупки всё равно
-# определяется по goods_id, роуты нужны только под настройки на площадке
 @router.get("/stars")
 async def stars_callback(uniquecode: str = "", unique_code: str = "", session: AsyncSession = Depends(get_session)) -> Response:
     return await _handle(uniquecode, unique_code, session)
 
 
 @router.get("/premium")
-async def premium_callback(uniquecode: str = "", unique_code: str = "", session: AsyncSession = Depends(get_session)) -> Response:
+async def premium_callback(
+    uniquecode: str = "", unique_code: str = "", session: AsyncSession = Depends(get_session)
+) -> Response:
     return await _handle(uniquecode, unique_code, session)
 
 

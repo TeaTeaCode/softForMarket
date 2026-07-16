@@ -31,12 +31,15 @@ class ProxyHeadersMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+_STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+_HAS_STATIC = _STATIC_DIR.exists()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     setup_logging()
-    static_dir = Path(__file__).resolve().parent.parent / "static"
-    if static_dir.exists():
-        app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    if _HAS_STATIC:
+        app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
     yield
 

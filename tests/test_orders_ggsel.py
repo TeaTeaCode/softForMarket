@@ -131,7 +131,6 @@ async def test_stars_rejected_on_invalid_username(run, value):
 
 
 async def test_stars_rejected_without_username_option(run):
-    # опции буста вместо @username — Fragment не должен уходить к поставщику
     r = await run(purchase("102558269", [{"name": "Ссылка", "value": "https://t.me/durov"}]))
 
     assert r.stars is None

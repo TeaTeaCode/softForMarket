@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
@@ -6,6 +7,8 @@ import yaml
 
 class LoggingConfig(BaseModel):
     file: Path
+    # отдельный файл воркера: на Windows ротация ломается, если два процесса держат один лог
+    worker_file: Path
     console_level: str
     file_level: str
     console_format: str
@@ -46,8 +49,6 @@ def _load_yaml(path: Path) -> dict:
 
 
 def load_config(yaml_path: Path | None = None, services_path: Path | None = None) -> Config:
-    import os
-
     if yaml_path is None:
         config_path_env = os.getenv("CONFIG_PATH")
         yaml_path = Path(config_path_env) if config_path_env else Path("config/config.yaml")

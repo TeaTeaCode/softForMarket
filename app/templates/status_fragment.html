@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+{% if auto_refresh %}<meta http-equiv="refresh" content="{{ auto_refresh }}">{% endif %}
+<title>TG-Boost — статус заказа</title>
+<style>
+  :root{--bg:#0b0f14;--card:#111827;--border:#1f2937;--text:#e5e7eb;--muted:#9ca3af;--accent:#60a5fa;}
+  *{box-sizing:border-box}
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,'Helvetica Neue',Arial,sans-serif;
+       background:var(--bg);color:var(--text);display:flex;align-items:center;justify-content:center;
+       min-height:100vh;margin:0;padding:24px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:16px;max-width:760px;width:100%;padding:24px}
+  h1{font-size:18px;margin:0 0 16px 0}
+  .row{display:grid;grid-template-columns:220px 1fr;gap:8px;align-items:start;padding:8px 0;border-top:1px dashed var(--border)}
+  .row:first-of-type{border-top:none}
+  .k{color:var(--muted)}
+  a{color:var(--accent);text-decoration:none;word-break:break-all}
+  .note{margin:0 0 12px 0;padding:12px;border:1px solid var(--border);border-radius:12px;background:#0f172a}
+  .footer{margin-top:16px;opacity:.75;font-size:13px;line-height:1.35}
+</style></head>
+<body>
+  <main class="card">
+    {% if top_note %}<div class="note">{{ top_note }}</div>{% endif %}
+    <h1>Статус заказа</h1>
+    <div class="row"><div class="k">услуга</div><div>{{ goods_name }}</div></div>
+    {% if kind == "premium" %}
+    <div class="row"><div class="k">срок подписки</div><div>{% if months %}{{ months }} мес.{% else %}—{% endif %}</div></div>
+    {% else %}
+    <div class="row"><div class="k">количество звёзд</div><div>{{ quantity }}</div></div>
+    {% endif %}
+    <div class="row"><div class="k">получатель</div><div>
+      {% if link and "t.me/" in link %}<a href="{{ link }}" target="_blank">{{ link }}</a>{% else %}—{% endif %}
+    </div></div>
+    <div class="row"><div class="k">статус</div><div>{{ status_line }}</div></div>
+    <div class="footer">{{ footer }}</div>
+  </main>
+</body></html>

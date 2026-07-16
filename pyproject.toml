@@ -91,6 +91,7 @@ ignore = [
 "app/core/config/**/*.py" = ["N815"]
 # Pydantic-схемы DTO: имена полей соответствуют контракту внешнего API (camelCase)
 "app/schemas/**/*.py" = ["N815"]
+"app/clients/suppliers/registry.py" = ["PLW0108"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]

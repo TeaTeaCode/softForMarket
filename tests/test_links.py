@@ -117,7 +117,6 @@ def test_extract_username_option_stars():
 
 
 def test_extract_username_option_premium():
-    # у Premium опция @username идёт второй, после месяцев
     assert extract_username_option(PREMIUM_OPTIONS) == ("durov", None)
 
 

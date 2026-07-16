@@ -12,6 +12,9 @@ goods_human:
   "5558688": "Бусты 30 дней"
   # PLATI range
   "5534877": "Бусты 1–180 дней"
+  # GGSEL Fragment
+  "102558269": "Telegram Stars"
+  "102558303": "Telegram Premium"
 
 # площадка → {goods_id с фиксированным сроком → service_id поставщика}
 fixed_product_to_service:

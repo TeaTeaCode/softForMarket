@@ -1,3 +1,4 @@
+import json
 from typing import Annotated
 
 from pydantic import SecretStr, computed_field, field_validator
@@ -101,8 +102,6 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             s = value.strip()
             if s.startswith("["):
-                import json
-
                 try:
                     parsed = json.loads(s)
                     if isinstance(parsed, list):

@@ -67,6 +67,62 @@ def test_invalid_link_order_shows_support_message(client):
     assert 'http-equiv="refresh"' not in r.text
 
 
+def stars_row(**over):
+    base = row(
+        goods_id="102558269",
+        days=0,
+        quantity=50,
+        tg_link="https://t.me/cxpykat",
+        supplier="fragment",
+        supplier_order_id="task-1",
+    )
+    base.update(over)
+    return base
+
+
+def test_stars_page_has_no_boost_wording(client):
+    r = get_status(client, stars_row(), fresh={"status": "processing"})
+
+    assert r.status_code == 200
+    assert "количество дней" not in r.text.lower()
+    assert "осталось накрутить" not in r.text.lower()
+    assert "ссылка тг" not in r.text.lower()
+
+
+def test_stars_page_shows_star_count_and_recipient(client):
+    r = get_status(client, stars_row(), fresh={"status": "processing"})
+
+    assert "количество звёзд" in r.text.lower()
+    assert ">50<" in r.text
+    assert "получатель" in r.text.lower()
+    assert "https://t.me/cxpykat" in r.text
+    assert "Telegram Stars" in r.text
+
+
+def test_premium_page_shows_months_not_star_count(client):
+    r = get_status(client, stars_row(goods_id="102558303", days=6, quantity=1), fresh={"status": "processing"})
+
+    assert "срок подписки" in r.text.lower()
+    assert "6 мес." in r.text
+    assert "количество звёзд" not in r.text.lower()
+    assert "Telegram Premium" in r.text
+
+
+def test_boost_page_keeps_boost_wording(client):
+    r = get_status(client, row(), fresh={"status": "processing", "remains": 3})
+
+    assert "количество дней" in r.text.lower()
+    assert "осталось накрутить" in r.text.lower()
+    assert "количество звёзд" not in r.text.lower()
+
+
+def test_fragment_invalid_username_uses_fragment_template(client):
+    r = get_status(client, stars_row(status="ERROR_INVALID_USERNAME"))
+
+    assert "@username" in r.text
+    assert "осталось накрутить" not in r.text.lower()
+
+
 def test_invalid_username_order_shows_username_message(client):
     r = get_status(client, row(status="ERROR_INVALID_USERNAME"))
 

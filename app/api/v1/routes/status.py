@@ -13,7 +13,7 @@ from app.clients.telegram.formatting import footer_for_platform, supplier_cancel
 from app.core.config.config import config
 from app.db import repository as repo
 from app.db.session import get_session
-from app.services.links import INVALID_TG_LINK_MSG, INVALID_TG_USERNAME_MSG
+from app.services.links import INVALID_TG_LINK_MSG, INVALID_TG_USERNAME_MSG, resolve_fragment_kind
 
 router = APIRouter()
 _templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[3] / "templates"))
@@ -79,6 +79,8 @@ async def status_view(
         return PlainTextResponse("Заказ не найден. Попробуйте позже или обратитесь в поддержку.", status_code=404)
 
     goods_id = str(row.get("goods_id") or "")
+    kind = resolve_fragment_kind(str(row.get("platform") or ""), goods_id)
+    template = "status_fragment.html" if str(row.get("supplier") or "") == "fragment" or kind else "status.html"
     ctx: dict[str, Any] = {
         "goods_name": config.services.goods_human.get(goods_id, goods_id),
         "days": int(row.get("days") or 0),
@@ -88,6 +90,8 @@ async def status_view(
         "remains": "—",
         "auto_refresh": None,
         "top_note": None,
+        "kind": kind,
+        "months": int(row.get("days") or 0),  # месяцы Premium кладём в days
     }
 
     invalid_input_msg = {
@@ -96,7 +100,7 @@ async def status_view(
     }.get(str(row.get("status") or ""))
     if invalid_input_msg:
         ctx |= {"status_line": invalid_input_msg, "top_note": invalid_input_msg}
-        return _templates.TemplateResponse(request, "status.html", ctx)
+        return _templates.TemplateResponse(request, template, ctx)
 
     st_obj = _safe_json(row.get("supplier_status"))
     order_id = str(row.get("supplier_order_id") or "").strip()
@@ -115,11 +119,11 @@ async def status_view(
             "auto_refresh": 30,
             "top_note": "Проверяем заказ. Страница обновится автоматически.",
         }
-        return _templates.TemplateResponse(request, "status.html", ctx)
+        return _templates.TemplateResponse(request, template, ctx)
 
     status_line, remains = _human_status(st_obj)
     # не финал → авто-обновление, чтобы клиент увидел «Завершён» без перезагрузки
     if not _is_final(st_obj):
         ctx["auto_refresh"] = 30
     ctx |= {"status_line": status_line, "remains": "—" if remains is None else str(remains)}
-    return _templates.TemplateResponse(request, "status.html", ctx)
+    return _templates.TemplateResponse(request, template, ctx)
