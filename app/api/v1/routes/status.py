@@ -13,7 +13,7 @@ from app.clients.telegram.formatting import footer_for_platform, supplier_cancel
 from app.core.config.config import config
 from app.db import repository as repo
 from app.db.session import get_session
-from app.services.links import INVALID_TG_LINK_MSG
+from app.services.links import INVALID_TG_LINK_MSG, INVALID_TG_USERNAME_MSG
 
 router = APIRouter()
 _templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[3] / "templates"))
@@ -90,8 +90,12 @@ async def status_view(
         "top_note": None,
     }
 
-    if str(row.get("status") or "") == "ERROR_INVALID_LINK":
-        ctx |= {"status_line": INVALID_TG_LINK_MSG, "top_note": INVALID_TG_LINK_MSG}
+    invalid_input_msg = {
+        "ERROR_INVALID_LINK": INVALID_TG_LINK_MSG,
+        "ERROR_INVALID_USERNAME": INVALID_TG_USERNAME_MSG,
+    }.get(str(row.get("status") or ""))
+    if invalid_input_msg:
+        ctx |= {"status_line": invalid_input_msg, "top_note": invalid_input_msg}
         return _templates.TemplateResponse(request, "status.html", ctx)
 
     st_obj = _safe_json(row.get("supplier_status"))

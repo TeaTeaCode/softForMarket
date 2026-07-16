@@ -6,11 +6,12 @@ import pytest
 from app.services.orders import _common as common, fragment as fragment_orders, ggsel as ggsel_orders
 from app.services.orders.ggsel import process_ggsel
 
-LINK_OPT = {"name": "Ссылка", "value": "https://t.me/durov"}
+# имена опций — как в выгрузке GGSEL parameters_offer_2558268/2558302.csv
+USERNAME_OPT = {"id": 5547537, "name": "@username", "value": "durov", "variant_id": None}
 
 
 def months_opt(value):
-    return {"name": "Количество месяцев подписки", "value": value}
+    return {"id": 5407393, "name": "Количество месяцев подписки", "value": value, "variant_id": 30069740}
 
 
 def purchase(goods_id, options, cnt="1"):
@@ -98,7 +99,7 @@ def run(monkeypatch):
 
 
 async def test_stars_order_accepted(run):
-    r = await run(purchase("102558269", [LINK_OPT], cnt="50"))
+    r = await run(purchase("102558269", [USERNAME_OPT], cnt="50"))
 
     assert r.stars == ("durov", 50)  # количество звёзд = cnt_goods
     assert r.row["status"] == "SUPPLIER_ACCEPTED"
@@ -109,7 +110,7 @@ async def test_stars_order_accepted(run):
 
 
 async def test_stars_rejected_when_username_not_found(run):
-    r = await run(purchase("102558269", [LINK_OPT]), username_ok=False)
+    r = await run(purchase("102558269", [USERNAME_OPT]), username_ok=False)
 
     assert r.stars is None  # заказ поставщику не ушёл
     assert r.row["status"] == "ERROR"
@@ -118,11 +119,23 @@ async def test_stars_rejected_when_username_not_found(run):
     assert r.scheduled == []
 
 
-async def test_stars_rejected_on_invite_link(run):
-    r = await run(purchase("102558269", [{"name": "Ссылка", "value": "https://t.me/+invite123"}]))
+@pytest.mark.parametrize(
+    "value",
+    ["https://t.me/+invite123", "+79001234567", "не username", ""],
+)
+async def test_stars_rejected_on_invalid_username(run, value):
+    r = await run(purchase("102558269", [{"id": 5547537, "name": "@username", "value": value}]))
 
     assert r.stars is None
-    assert r.row["status"] == "ERROR_INVALID_LINK"
+    assert r.row["status"] == "ERROR_INVALID_USERNAME"
+
+
+async def test_stars_rejected_without_username_option(run):
+    # опции буста вместо @username — Fragment не должен уходить к поставщику
+    r = await run(purchase("102558269", [{"name": "Ссылка", "value": "https://t.me/durov"}]))
+
+    assert r.stars is None
+    assert r.row["status"] == "ERROR_INVALID_USERNAME"
 
 
 # ─── Premium ─────────────────────────────────────────────────────────────────
@@ -130,7 +143,7 @@ async def test_stars_rejected_on_invite_link(run):
 
 @pytest.mark.parametrize("value,expected", [("3 месяца", 3), ("6 месяцев", 6), ("12 месяцев", 12)])
 async def test_premium_order_accepted(run, value, expected):
-    r = await run(purchase("102558303", [LINK_OPT, months_opt(value)]))
+    r = await run(purchase("102558303", [USERNAME_OPT, months_opt(value)]))
 
     assert r.premium == ("durov", expected)
     assert r.row["status"] == "SUPPLIER_ACCEPTED"
@@ -140,7 +153,7 @@ async def test_premium_order_accepted(run, value, expected):
 
 
 async def test_premium_rejected_without_months(run):
-    r = await run(purchase("102558303", [LINK_OPT]))
+    r = await run(purchase("102558303", [USERNAME_OPT]))
 
     assert r.premium is None
     assert r.row["status"] == "ERROR"
@@ -149,7 +162,7 @@ async def test_premium_rejected_without_months(run):
 
 async def test_premium_rejected_on_unsupported_months(run):
     # Fragment принимает только 3/6/12 — отбиваем до вызова API
-    r = await run(purchase("102558303", [LINK_OPT, months_opt("5 месяцев")]))
+    r = await run(purchase("102558303", [USERNAME_OPT, months_opt("5 месяцев")]))
 
     assert r.premium is None
     assert r.row["status"] == "ERROR"

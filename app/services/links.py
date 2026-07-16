@@ -6,6 +6,9 @@ from app.core.config.config import config
 INVALID_TG_LINK_MSG = (
     "Указана неверная ссылка на канал. Напишите в поддержку, указав ссылку для вступления в канал. Мы перезапустим заказ."
 )
+INVALID_TG_USERNAME_MSG = (
+    "Указан неверный @username получателя. Напишите в поддержку, указав username аккаунта. Мы перезапустим заказ."
+)
 
 _TME_RE = re.compile(r"^(?:https?://)?(?:www\.)?t\.me/(?P<path>.+)$", re.IGNORECASE)
 _USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{5,32}$")
@@ -140,6 +143,24 @@ def extract_username(raw: Any) -> tuple[str | None, str | None]:
     if not _USERNAME_RE.match(s):
         return None, INVALID_TG_LINK_MSG
     return s, None
+
+
+def extract_username_option(options: Any) -> tuple[str | None, str | None]:
+    """Достаёт @username получателя из опций заказа Stars/Premium → (username, ошибка)."""
+    if not isinstance(options, list):
+        return None, INVALID_TG_USERNAME_MSG
+
+    for opt in options:
+        try:
+            name = str(opt.get("name", "")).strip().lower()
+            val = opt.get("value")
+        except AttributeError:
+            continue
+
+        if "username" in name or "юзернейм" in name:
+            username, _ = extract_username(val)
+            return (username, None) if username else (None, INVALID_TG_USERNAME_MSG)
+    return None, INVALID_TG_USERNAME_MSG
 
 
 def extract_months(options: Any) -> int | None:

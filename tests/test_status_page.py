@@ -67,6 +67,16 @@ def test_invalid_link_order_shows_support_message(client):
     assert 'http-equiv="refresh"' not in r.text
 
 
+def test_invalid_username_order_shows_username_message(client):
+    r = get_status(client, row(status="ERROR_INVALID_USERNAME"))
+
+    assert r.status_code == 200
+    # Stars/Premium покупают на аккаунт — про ссылку на канал писать нельзя
+    assert "@username" in r.text
+    assert "ссылка на канал" not in r.text.lower()
+    assert 'http-equiv="refresh"' not in r.text
+
+
 def test_uniquecode_alias_works(client):
     with (
         patch.object(status_route.repo, "get_by_unique_code", AsyncMock(return_value=row(status="ERROR_INVALID_LINK"))),

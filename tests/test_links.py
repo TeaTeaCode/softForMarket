@@ -1,13 +1,22 @@
 import pytest
 
 from app.services.links import (
+    INVALID_TG_USERNAME_MSG,
     extract_days_and_link,
     extract_months,
     extract_username,
+    extract_username_option,
     normalize_tg_link,
     resolve_fragment_kind,
     resolve_service,
 )
+
+# опции из выгрузки GGSEL: parameters_offer_2558268.csv (Stars) и _2558302.csv (Premium)
+STARS_OPTIONS = [{"id": 5547537, "name": "@username", "value": "durov", "variant_id": None}]
+PREMIUM_OPTIONS = [
+    {"id": 5407393, "name": "Количество месяцев подписки", "value": "3 месяца", "variant_id": 30069740},
+    {"id": 5547798, "name": "@username", "value": "@durov", "variant_id": None},
+]
 
 
 @pytest.mark.parametrize(
@@ -101,6 +110,43 @@ def test_extract_days_and_link():
     days, link = extract_days_and_link(options)
     assert days == 90
     assert link == "https://t.me/mychannel"
+
+
+def test_extract_username_option_stars():
+    assert extract_username_option(STARS_OPTIONS) == ("durov", None)
+
+
+def test_extract_username_option_premium():
+    # у Premium опция @username идёт второй, после месяцев
+    assert extract_username_option(PREMIUM_OPTIONS) == ("durov", None)
+
+
+def test_extract_username_option_premium_months_still_parsed():
+    assert extract_months(PREMIUM_OPTIONS) == 3
+
+
+@pytest.mark.parametrize("value", ["https://t.me/durov", "t.me/durov", "@durov", "durov"])
+def test_extract_username_option_accepts_any_input_form(value):
+    options = [{"id": 5547537, "name": "@username", "value": value, "variant_id": None}]
+    assert extract_username_option(options) == ("durov", None)
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        [],
+        None,
+        "не список",
+        [{"id": 59069, "name": "Ссылка на канала вида https://t.me/...", "value": "https://t.me/x"}],  # опции буста
+        [{"id": 5547537, "name": "@username", "value": "+79001234567"}],  # телефон вместо ника
+        [{"id": 5547537, "name": "@username", "value": ""}],
+        [{"id": 5547537, "name": "@username", "value": "https://t.me/+4yuWzgnVZcVlMWJi"}],  # инвайт, не username
+    ],
+)
+def test_extract_username_option_invalid(options):
+    username, err = extract_username_option(options)
+    assert username is None
+    assert err == INVALID_TG_USERNAME_MSG
 
 
 @pytest.mark.parametrize(

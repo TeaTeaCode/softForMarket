@@ -9,7 +9,7 @@ from app.clients.suppliers.fragment import PREMIUM_MONTHS, fragment
 from app.clients.telegram import formatting as fmt
 from app.db import repository as repo
 from app.services import background
-from app.services.links import INVALID_TG_LINK_MSG, extract_months, extract_username
+from app.services.links import INVALID_TG_USERNAME_MSG, extract_months, extract_username_option
 from app.services.orders._common import _notify, _purchase_fields, _purchase_row, status_url
 
 # тип товара → как оформить заказ у Fragment
@@ -60,9 +60,9 @@ async def process_fragment(
             dedupe=(unique_code, "fail"),
         )
 
-    username, link_err = extract_username(link)
-    if link_err or not username:
-        await fail(INVALID_TG_LINK_MSG, "ERROR_INVALID_LINK")
+    username, username_err = extract_username_option(options)
+    if username_err or not username:
+        await fail(INVALID_TG_USERNAME_MSG, "ERROR_INVALID_USERNAME")
         return
 
     if kind == "premium" and not months:
