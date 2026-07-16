@@ -52,6 +52,30 @@ def test_ggsel_accepts_unique_code_alias(client):
     proc.assert_awaited_once()
 
 
+@pytest.mark.parametrize("path", ["/stars", "/premium"])
+def test_fragment_routes_redirect_to_status(client, path):
+    with patch.object(ggsel_route, "process_ggsel", AsyncMock(return_value="ABC")) as proc:
+        r = client.get(f"{path}?uniquecode=ABC", follow_redirects=False)
+
+    assert r.status_code == 302
+    assert "/status?code=ABC" in r.headers["location"]
+    proc.assert_awaited_once()
+
+
+@pytest.mark.parametrize("path", ["/stars", "/premium"])
+def test_fragment_routes_require_code(client, path):
+    assert client.get(path).status_code == 400
+
+
+@pytest.mark.parametrize("path", ["/stars", "/premium"])
+def test_fragment_routes_accept_unique_code_alias(client, path):
+    with patch.object(ggsel_route, "process_ggsel", AsyncMock(return_value="ABC")) as proc:
+        r = client.get(f"{path}?unique_code=ABC", follow_redirects=False)
+
+    assert r.status_code == 302
+    proc.assert_awaited_once()
+
+
 def test_digiseller_redirects_to_status(client):
     with patch.object(digi_route, "process_digiseller", AsyncMock(return_value="XYZ")) as proc:
         r = client.get("/digiseller-callback?uniquecode=XYZ", follow_redirects=False)
