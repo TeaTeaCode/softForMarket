@@ -63,9 +63,33 @@ async def test_notify_survives_telegram_failure():
     # send_message ловит всё внутри и возвращает False — заказ не должен падать
     with (
         patch.object(common.repo, "try_mark_notified", AsyncMock(return_value=True)),
+        patch.object(common.repo, "unmark_notified", AsyncMock()),
         patch.object(common.telegram, "send_message", AsyncMock(return_value=False)),
     ):
         await common._notify(None, "текст", dedupe=("C1", "fail"))
+
+
+async def test_notify_unmarks_dedupe_when_send_fails():
+    with (
+        patch.object(common.repo, "try_mark_notified", AsyncMock(return_value=True)),
+        patch.object(common.repo, "unmark_notified", AsyncMock()) as unmark,
+        patch.object(common.telegram, "send_message", AsyncMock(return_value=False)),
+    ):
+        await common._notify(None, "текст", dedupe=("C1", "fail"))
+
+    unmark.assert_awaited_once()
+    assert unmark.await_args.args[1:] == ("C1", "fail")
+
+
+async def test_notify_keeps_dedupe_when_send_succeeds():
+    with (
+        patch.object(common.repo, "try_mark_notified", AsyncMock(return_value=True)),
+        patch.object(common.repo, "unmark_notified", AsyncMock()) as unmark,
+        patch.object(common.telegram, "send_message", AsyncMock(return_value=True)),
+    ):
+        await common._notify(None, "текст", dedupe=("C1", "fail"))
+
+    unmark.assert_not_awaited()
 
 
 # ─── Фоновая проверка статуса → уведомление ──────────────────────────────────

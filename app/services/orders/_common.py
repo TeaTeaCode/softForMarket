@@ -23,6 +23,9 @@ async def _notify(session: AsyncSession, text: str, silent: bool = False, dedupe
             logger.info(f"[TG] пропуск дубля уведомления code={code} kind={kind}")
             return
     ok = await telegram.send_message(text, silent=silent)
+    # метка ставится до отправки — иначе право на повтор потеряно
+    if not ok and dedupe:
+        await repo.unmark_notified(session, *dedupe)
     logger.info(f"[TG] {'отправлено' if ok else 'НЕ ОТПРАВЛЕНО'} silent={silent} dedupe={dedupe} text={text!r}")
 
 

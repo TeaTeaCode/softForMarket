@@ -38,12 +38,12 @@ def order(**over):
 def poll():
     """Один цикл поллера. Возвращает (отправленные сообщения, сохранённые статусы)."""
 
-    async def _poll(rows, status, notified_ok=True):
+    async def _poll(rows, status, notified_ok=True, already_notified=False, send_ok=True):
         sent, saved = [], []
 
         async def send(message, silent=False):
             sent.append((message, silent))
-            return True
+            return send_ok
 
         async def update(session, code, payload):
             saved.append((code, payload))
@@ -53,11 +53,14 @@ def poll():
             patch.object(background.repo, "get_pending_orders", AsyncMock(return_value=rows)),
             patch.object(background.repo, "update_supplier_by_ucode", AsyncMock(side_effect=update)),
             patch.object(background.repo, "try_mark_notified", AsyncMock(return_value=notified_ok)),
+            patch.object(background.repo, "is_notified", AsyncMock(return_value=already_notified)),
+            patch.object(background.repo, "unmark_notified", AsyncMock()) as unmark,
             patch.object(background.telegram, "send_message", AsyncMock(side_effect=send)),
             patch.object(registry.fragment, "get_task_status", AsyncMock(return_value=status)),
             patch.object(registry.smm_panel, "get_supplier_status", AsyncMock(return_value=status)),
         ):
             await background._poll_orders_once()
+            _poll.unmark = unmark
         return sent, saved
 
     return _poll
@@ -89,12 +92,35 @@ async def test_intermediate_status_saved_but_no_spam(poll, status):
     assert saved and json.loads(saved[0][1]) == {"status": status}
 
 
-async def test_already_final_order_is_not_polled(poll):
+async def test_already_final_and_notified_order_is_not_polled(poll):
     row = order(supplier_status=json.dumps({"status": "success"}))
-    sent, saved = await poll([row], {"status": "success"})
+    sent, saved = await poll([row], {"status": "success"}, already_notified=True)
 
     assert sent == []
     assert saved == []  # к поставщику не ходили
+
+
+async def test_final_status_without_notification_is_resent(poll):
+    """Статус успел сохраниться, а уведомление — нет: заказ нельзя считать закрытым."""
+    row = order(supplier_status=json.dumps({"status": "success"}))
+    sent, _ = await poll([row], {"status": "success"}, already_notified=False)
+
+    assert len(sent) == 1
+    assert sent[0][0].startswith("✅ ЗАКАЗ ВЫПОЛНЕН")
+
+
+async def test_failed_send_unmarks_notified(poll):
+    sent, _ = await poll([order()], {"status": "success"}, send_ok=False)
+
+    assert len(sent) == 1  # попытка была
+    poll.unmark.assert_awaited_once()
+    assert poll.unmark.await_args.args[1:] == ("CODE-1", "final")
+
+
+async def test_successful_send_keeps_notified_mark(poll):
+    await poll([order()], {"status": "success"}, send_ok=True)
+
+    poll.unmark.assert_not_awaited()
 
 
 async def test_stale_order_is_dropped(poll):

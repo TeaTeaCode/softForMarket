@@ -108,8 +108,11 @@ async def _status_check(
                 _status_url(unique_code),
             )
             silent = _is_status_ok(status)
-            if await repo.try_mark_notified(session, unique_code, "final"):
-                await telegram.send_message(msg, silent=silent)
+            if await repo.try_mark_notified(session, unique_code, "final") and not await telegram.send_message(
+                msg, silent=silent
+            ):
+                await repo.unmark_notified(session, unique_code, "final")
+                logger.warning(f"[BG] уведомление не ушло code={unique_code} — дошлёт поллер")
     except Exception as e:
         logger.warning(f"[BG] проверка статуса не удалась code={unique_code} order={order_id}: {e}")
 
@@ -179,8 +182,12 @@ async def _poll_order(row: dict[str, Any]) -> None:
         return
 
     saved = _safe_json(row.get("supplier_status"))
+    # финал мог сохраниться, а уведомление — не уйти
     if _is_final_status(saved):
-        return
+        async with async_session() as session:
+            if await repo.is_notified(session, unique_code, "final"):
+                return
+        logger.info(f"[ORDER-POLL] финал без уведомления code={unique_code} — досылаем")
     if _is_order_stale(row.get("created_at")):
         logger.info(f"[ORDER-POLL] ⏭ заказ протух code={unique_code} created_at={row.get('created_at')}")
         return
@@ -209,7 +216,11 @@ async def _poll_order(row: dict[str, Any]) -> None:
             status,
             _status_url(unique_code),
         )
-        await telegram.send_message(msg, silent=silent)
+        if not await telegram.send_message(msg, silent=silent):
+            # иначе следующий цикл сочтёт заказ уведомлённым
+            await repo.unmark_notified(session, unique_code, "final")
+            logger.warning(f"[ORDER-POLL] уведомление не ушло code={unique_code} — повторим в следующем цикле")
+            return
         logger.info(
             f"[ORDER-POLL] финал code={unique_code} status={status.get('status') if isinstance(status, dict) else status}"
         )

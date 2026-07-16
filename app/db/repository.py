@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import time
 from typing import Any
 
@@ -40,10 +40,14 @@ async def get_by_unique_code(session: AsyncSession, unique_code: str) -> dict[st
 
 async def get_pending_orders(session: AsyncSession, limit: int = 200) -> list[dict[str, Any]]:
     """Заказы, принятые поставщиком: у них есть order_id, но статус мог не дойти до финала."""
+    # протухшие отсеиваем в SQL, иначе они занимают весь батч и вытесняют живые заказы
+    cutoff = datetime.now(UTC) - timedelta(hours=settings.ORDER_POLL_MAX_AGE_HOURS)
+    min_created = cutoff.astimezone().isoformat(timespec="seconds")  # created_at — ISO-строка, см. now_iso
     result = await session.execute(
         select(Purchase)
         .where(Purchase.status == "SUPPLIER_ACCEPTED")
         .where(Purchase.supplier_order_id.is_not(None))
+        .where(Purchase.created_at >= min_created)
         .order_by(Purchase.id.desc())
         .limit(limit)
     )
@@ -165,6 +169,17 @@ async def try_mark_notified(session: AsyncSession, unique_code: str, kind: str) 
     await session.execute(insert(Notified).values(unique_code=unique_code, kind=kind))
     await session.commit()
     return True
+
+
+async def is_notified(session: AsyncSession, unique_code: str, kind: str) -> bool:
+    result = await session.execute(select(Notified).where(Notified.unique_code == unique_code, Notified.kind == kind))
+    return result.scalars().first() is not None
+
+
+async def unmark_notified(session: AsyncSession, unique_code: str, kind: str) -> None:
+    """Откат метки: отправка не удалась."""
+    await session.execute(delete(Notified).where(Notified.unique_code == unique_code, Notified.kind == kind))
+    await session.commit()
 
 
 # ─── ggsel_chats ─────────────────────────────────────────────────────────────
