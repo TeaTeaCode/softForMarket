@@ -5,7 +5,7 @@ from typing import Any
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clients.suppliers.fragment import PREMIUM_MONTHS, fragment
+from app.clients.suppliers.fragment import PREMIUM_MONTHS, Source, fragment
 from app.clients.telegram import formatting as fmt
 from app.db import repository as repo
 from app.services import background
@@ -13,9 +13,14 @@ from app.services.links import INVALID_TG_USERNAME_MSG, extract_months, extract_
 from app.services.orders._common import _notify, _purchase_fields, _purchase_row, status_url
 
 # тип товара → как оформить заказ у Fragment
-_CREATE_ORDER: dict[str, Callable[[str, int, int | None], Awaitable[str]]] = {
-    "stars": lambda username, quantity, months: fragment.create_stars_order(username, quantity),
-    "premium": lambda username, quantity, months: fragment.create_premium_order(username, int(months or 0)),
+_CREATE_ORDER: dict[str, Callable[[str, int, int | None, Source], Awaitable[str]]] = {
+    "stars": lambda username, quantity, months, source: fragment.create_stars_order(username, quantity, source),
+    "premium": lambda username, quantity, months, source: fragment.create_premium_order(username, int(months or 0), source),
+}
+
+_SOURCE_LABELS: dict[Source, tuple[str, str]] = {
+    Source.ggsel: ("ggsel", "GGSEL"),
+    Source.digiseller: ("digiseller", "PLATI"),
 }
 
 
@@ -31,21 +36,23 @@ async def process_fragment(
     link: Any,
     quantity: int,
     options: list,
+    source: Source,
 ) -> None:
     """Оформление Stars/Premium через Fragment. Заказ асинхронный: сохраняем task_id."""
     months = extract_months(options) if kind == "premium" else None
+    platform, label = _SOURCE_LABELS[source]
 
     async def fail(message: str, status: str = "ERROR") -> None:
         logger.error(f"[FRAGMENT] ✖ отказ code={unique_code} kind={kind} status={status}: {message}")
         row = _purchase_row(
-            "ggsel", unique_code, inv, goods_id, data, email, link, months, quantity, None, status, supplier="fragment"
+            platform, unique_code, inv, goods_id, data, email, link, months, quantity, None, status, supplier="fragment"
         )
         row["supplier_status"] = json.dumps({"status": "error", "message": message}, ensure_ascii=False)
         await repo.insert_purchase(session, row)
         await _notify(
             session,
             fmt.fmt_failure_msg(
-                "GGSEL",
+                label,
                 unique_code,
                 _purchase_fields(data, goods_id),
                 email,
@@ -78,12 +85,12 @@ async def process_fragment(
         await fail(f"Fragment: получатель @{username} не найден")
         return
 
-    task_id = await _CREATE_ORDER[kind](username, quantity, months)
+    task_id = await _CREATE_ORDER[kind](username, quantity, months, source)
 
     await repo.insert_purchase(
         session,
         _purchase_row(
-            "ggsel",
+            platform,
             unique_code,
             inv,
             goods_id,
@@ -102,7 +109,7 @@ async def process_fragment(
         f"qty={quantity} months={months} task_id={task_id}"
     )
     background.schedule_status_check(
-        "GGSEL",
+        label,
         unique_code,
         task_id,
         _purchase_fields(data, goods_id),

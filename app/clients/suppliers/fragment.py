@@ -1,3 +1,4 @@
+from enum import StrEnum
 from typing import Any
 
 from loguru import logger
@@ -12,6 +13,11 @@ FINAL_STATUSES = frozenset({"success", "failed"})
 PREMIUM_MONTHS = frozenset({3, 6, 12})
 
 
+class Source(StrEnum):
+    ggsel = "ggsel"
+    digiseller = "digiseller"
+
+
 class FragmentApi(BaseApi):
     def __init__(self) -> None:
         super().__init__(
@@ -19,20 +25,20 @@ class FragmentApi(BaseApi):
             headers={"X-API-Key": settings.FRAGMENT_API_KEY.get_secret_value()},
         )
 
-    async def create_stars_order(self, username: str, quantity: int) -> str:
+    async def create_stars_order(self, username: str, quantity: int, source: Source) -> str:
         """Покупка Stars. Возвращает task_id — покупка асинхронная."""
-        payload = {"username": username, "quantity": quantity}
-        logger.info(f"[FRAGMENT] stars username={username} qty={quantity}")
+        payload = {"username": username, "quantity": quantity, "source": source.value}
+        logger.info(f"[FRAGMENT] stars username={username} qty={quantity} source={source.value}")
         data: dict[str, Any] = await self.request("POST", "/api/purchase/stars", json_data=payload)
         logger.info(f"[FRAGMENT] ответ на stars: {data}")
         return self._task_id(data)
 
-    async def create_premium_order(self, username: str, months: int) -> str:
+    async def create_premium_order(self, username: str, months: int, source: Source) -> str:
         """Покупка Premium. Возвращает task_id — покупка асинхронная."""
         if months not in PREMIUM_MONTHS:
             raise RuntimeError(f"Fragment принимает подписку только на {sorted(PREMIUM_MONTHS)} мес., получено: {months}")
-        payload = {"username": username, "months": months}
-        logger.info(f"[FRAGMENT] premium username={username} months={months}")
+        payload = {"username": username, "months": months, "source": source.value}
+        logger.info(f"[FRAGMENT] premium username={username} months={months} source={source.value}")
         data: dict[str, Any] = await self.request("POST", "/api/purchase/premium", json_data=payload)
         logger.info(f"[FRAGMENT] ответ на premium: {data}")
         return self._task_id(data)

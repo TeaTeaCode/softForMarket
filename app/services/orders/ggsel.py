@@ -2,6 +2,7 @@ from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.platforms.ggsel import ggsel
+from app.clients.suppliers.fragment import Source
 from app.clients.suppliers.smm_panel import smm_panel
 from app.clients.telegram import formatting as fmt
 from app.core.config.config import config
@@ -49,7 +50,9 @@ async def process_ggsel(session: AsyncSession, unique_code: str) -> str:
 
         if kind := resolve_fragment_kind("ggsel", goods_id):
             logger.info(f"[GGSEL] → маршрут Fragment ({kind}) code={unique_code}")
-            await process_fragment(session, kind, unique_code, data, inv, goods_id, goods_name, email, link, quantity, options)
+            await process_fragment(
+                session, kind, unique_code, data, inv, goods_id, goods_name, email, link, quantity, options, Source.ggsel
+            )
             return unique_code
 
         service_id = resolve_service("ggsel", goods_id, days)

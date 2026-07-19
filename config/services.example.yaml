@@ -37,7 +37,9 @@ fragment_products:
   ggsel:
     "102558269": "stars"     # Telegram Stars
     "102558303": "premium"   # Telegram Premium
-  plati: {}                  # аналогов Stars/Premium на PLATI нет
+  plati:
+    "5560001": "stars"       # Telegram Stars
+    "5560002": "premium"     # Telegram Premium
 
 # количество дней → service_id поставщика
 days_to_service:

@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.clients.suppliers.fragment import Source
 from app.services.orders import _common as common, fragment as fragment_orders, ggsel as ggsel_orders
 from app.services.orders.ggsel import process_ggsel
 
@@ -52,12 +53,12 @@ def run(monkeypatch):
     async def _run(data, username_ok=True):
         r = Run()
 
-        async def stars(username, quantity):
-            r.stars = (username, quantity)
+        async def stars(username, quantity, source):
+            r.stars = (username, quantity, source)
             return "task-STARS"
 
-        async def premium(username, months):
-            r.premium = (username, months)
+        async def premium(username, months, source):
+            r.premium = (username, months, source)
             return "task-PREM"
 
         async def smm(service, link, qty):
@@ -101,7 +102,7 @@ def run(monkeypatch):
 async def test_stars_order_accepted(run):
     r = await run(purchase("102558269", [USERNAME_OPT], cnt="50"))
 
-    assert r.stars == ("durov", 50)  # количество звёзд = cnt_goods
+    assert r.stars == ("durov", 50, Source.ggsel)  # количество звёзд = cnt_goods
     assert r.row["status"] == "SUPPLIER_ACCEPTED"
     assert r.row["supplier"] == "fragment"
     assert r.row["supplier_order_id"] == "task-STARS"
@@ -144,7 +145,7 @@ async def test_stars_rejected_without_username_option(run):
 async def test_premium_order_accepted(run, value, expected):
     r = await run(purchase("102558303", [USERNAME_OPT, months_opt(value)]))
 
-    assert r.premium == ("durov", expected)
+    assert r.premium == ("durov", expected, Source.ggsel)
     assert r.row["status"] == "SUPPLIER_ACCEPTED"
     assert r.row["supplier"] == "fragment"
     assert r.row["days"] == expected  # месяцы кладём в days

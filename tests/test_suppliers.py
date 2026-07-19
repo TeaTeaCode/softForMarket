@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 
-from app.clients.suppliers.fragment import PREMIUM_MONTHS, FragmentApi
+from app.clients.suppliers.fragment import PREMIUM_MONTHS, FragmentApi, Source
 from app.clients.suppliers.smm_panel import SmmPanelApi
 
 
@@ -30,12 +30,12 @@ async def test_fragment_stars_sends_contract_and_returns_task_id():
         return httpx.Response(200, json={"task_id": "task-42"})
 
     api = _api(FragmentApi, handler)
-    task_id = await api.create_stars_order("durov", 50)
+    task_id = await api.create_stars_order("durov", 50, Source.ggsel)
 
     assert task_id == "task-42"
     assert seen["path"] == "/api/purchase/stars"
     assert seen["key"] == "secret"
-    assert seen["body"] == {"username": "durov", "quantity": 50}
+    assert seen["body"] == {"username": "durov", "quantity": 50, "source": "ggsel"}
 
 
 async def test_fragment_premium_sends_contract_and_returns_task_id():
@@ -47,17 +47,17 @@ async def test_fragment_premium_sends_contract_and_returns_task_id():
         return httpx.Response(200, json={"task_id": "task-77"})
 
     api = _api(FragmentApi, handler)
-    task_id = await api.create_premium_order("durov", 6)
+    task_id = await api.create_premium_order("durov", 6, Source.digiseller)
 
     assert task_id == "task-77"
     assert seen["path"] == "/api/purchase/premium"
-    assert seen["body"] == {"username": "durov", "months": 6}
+    assert seen["body"] == {"username": "durov", "months": 6, "source": "digiseller"}
 
 
 @pytest.mark.parametrize("months", sorted(PREMIUM_MONTHS))
 async def test_fragment_premium_accepts_allowed_months(months):
     api = _api(FragmentApi, lambda r: httpx.Response(200, json={"task_id": "t"}))
-    assert await api.create_premium_order("durov", months) == "t"
+    assert await api.create_premium_order("durov", months, Source.ggsel) == "t"
 
 
 @pytest.mark.parametrize("months", [0, 1, 2, 5, 13, 24])
@@ -72,14 +72,14 @@ async def test_fragment_premium_rejects_other_months_before_request(months):
 
     api = _api(FragmentApi, handler)
     with pytest.raises(RuntimeError, match="только на"):
-        await api.create_premium_order("durov", months)
+        await api.create_premium_order("durov", months, Source.ggsel)
     assert called is False
 
 
 async def test_fragment_raises_without_task_id():
     api = _api(FragmentApi, lambda r: httpx.Response(200, json={"detail": "oops"}))
     with pytest.raises(RuntimeError, match="task_id"):
-        await api.create_stars_order("durov", 10)
+        await api.create_stars_order("durov", 10, Source.ggsel)
 
 
 async def test_fragment_task_status():

@@ -2,12 +2,13 @@ from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.platforms.digiseller import digiseller
+from app.clients.suppliers.fragment import Source
 from app.clients.suppliers.smm_panel import smm_panel
 from app.clients.telegram import formatting as fmt
 from app.core.config.config import config
 from app.db import repository as repo
 from app.services import background
-from app.services.links import extract_days_and_link, normalize_tg_link, resolve_service
+from app.services.links import extract_days_and_link, normalize_tg_link, resolve_fragment_kind, resolve_service
 from app.services.orders._common import (
     _finish_inv,
     _int_or_none,
@@ -19,6 +20,7 @@ from app.services.orders._common import (
     _save_invalid_link,
     status_url,
 )
+from app.services.orders.fragment import process_fragment
 
 
 async def process_digiseller(session: AsyncSession, unique_code: str) -> str:
@@ -49,6 +51,25 @@ async def process_digiseller(session: AsyncSession, unique_code: str) -> str:
         if inv is not None and await repo.is_processed(session, inv):
             return unique_code
         if inv is not None and not await repo.try_acquire_inflight_inv(session, inv):
+            return unique_code
+
+        if kind := resolve_fragment_kind("plati", goods_id):
+            logger.info(f"[PLATI] → маршрут Fragment ({kind}) code={unique_code}")
+            await _finish_inv(session, inv)
+            await process_fragment(
+                session,
+                kind,
+                unique_code,
+                purchase,
+                inv,
+                goods_id,
+                goods_name,
+                email,
+                link,
+                quantity,
+                options,
+                Source.digiseller,
+            )
             return unique_code
 
         service_id = resolve_service("plati", goods_id, days)

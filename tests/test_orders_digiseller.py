@@ -3,11 +3,17 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.services.orders import _common as common, digiseller as digi_orders
+from app.clients.suppliers.fragment import Source
+from app.services.orders import _common as common, digiseller as digi_orders, fragment as fragment_orders
 from app.services.orders.digiseller import process_digiseller
 
 LINK_OPT = {"name": "Ссылка", "value": "https://t.me/mychannel"}
 DAYS_OPT = {"name": "Количество дней", "value": "90"}
+USERNAME_OPT = {"id": 5547537, "name": "@username", "value": "durov"}
+
+
+def months_opt(value):
+    return {"id": 5407393, "name": "Количество месяцев подписки", "value": value}
 
 
 def purchase(goods_id="5558693", options=None, **over):
@@ -33,6 +39,8 @@ class Run:
         self.processed = []
         self.released = []
         self.saved_orders = []
+        self.stars = None
+        self.premium = None
 
     @property
     def row(self):
@@ -46,7 +54,7 @@ class Run:
 
 @pytest.fixture
 def run():
-    async def _run(data, *, is_processed=False, lock_free=True, supplier_resp=None, supplier_error=None):
+    async def _run(data, *, is_processed=False, lock_free=True, supplier_resp=None, supplier_error=None, username_ok=True):
         r = Run()
 
         async def smm(service, link, qty):
@@ -55,7 +63,19 @@ def run():
                 raise supplier_error
             return supplier_resp if supplier_resp is not None else {"order": "smm-1"}
 
+        async def stars(username, quantity, source):
+            r.stars = (username, quantity, source)
+            return "task-STARS"
+
+        async def premium(username, months, source):
+            r.premium = (username, months, source)
+            return "task-PREM"
+
+        # Fragment-товары для PLATI задаются в config; в тестах маппим по goods_id
+        fragment_kinds = {"5560001": "stars", "5560002": "premium"}
+
         with (
+            patch.object(digi_orders, "resolve_fragment_kind", lambda platform, gid: fragment_kinds.get(str(gid))),
             patch.object(digi_orders.repo, "get_by_unique_code", AsyncMock(return_value=None)),
             patch.object(digi_orders.repo, "is_processed", AsyncMock(return_value=is_processed)),
             patch.object(digi_orders.repo, "try_acquire_inflight_inv", AsyncMock(return_value=lock_free)),
@@ -74,8 +94,17 @@ def run():
             patch.object(common.telegram, "send_message", AsyncMock(return_value=True)),
             patch.object(digi_orders.digiseller, "get_purchase", AsyncMock(return_value=data)),
             patch.object(digi_orders.smm_panel, "create_supplier_order", AsyncMock(side_effect=smm)),
+            patch.object(fragment_orders.repo, "insert_purchase", AsyncMock(side_effect=lambda s, row: r.rows.append(row))),
+            patch.object(fragment_orders.fragment, "check_username", AsyncMock(return_value=username_ok)),
+            patch.object(fragment_orders.fragment, "create_stars_order", AsyncMock(side_effect=stars)),
+            patch.object(fragment_orders.fragment, "create_premium_order", AsyncMock(side_effect=premium)),
             patch.object(
                 digi_orders.background,
+                "schedule_status_check",
+                lambda *a, **k: r.scheduled.append(a[2]),
+            ),
+            patch.object(
+                fragment_orders.background,
                 "schedule_status_check",
                 lambda *a, **k: r.scheduled.append(a[2]),
             ),
@@ -179,6 +208,42 @@ async def test_supplier_exception_notifies_without_row(run):
 
     # покупка не записана — клиент увидит 404 на /status
     assert r.rows == []
+    assert r.scheduled == []
+
+
+# ─── Fragment (Stars/Premium через PLATI) ────────────────────────────────────
+
+
+async def test_fragment_stars_accepted(run):
+    r = await run(purchase(goods_id="5560001", options=[USERNAME_OPT], cnt_goods="50"))
+
+    assert r.smm is None  # ушло в Fragment, а не в SMM Panel
+    assert r.stars == ("durov", 50, Source.digiseller)
+    assert r.row["status"] == "SUPPLIER_ACCEPTED"
+    assert r.row["platform"] == "digiseller"
+    assert r.row["supplier"] == "fragment"
+    assert r.row["supplier_order_id"] == "task-STARS"
+    assert r.scheduled == ["task-STARS"]
+    assert r.processed == [777]  # Fragment не ретраит после add
+
+
+@pytest.mark.parametrize("value,expected", [("3 месяца", 3), ("6 месяцев", 6), ("12 месяцев", 12)])
+async def test_fragment_premium_accepted(run, value, expected):
+    r = await run(purchase(goods_id="5560002", options=[USERNAME_OPT, months_opt(value)]))
+
+    assert r.premium == ("durov", expected, Source.digiseller)
+    assert r.row["status"] == "SUPPLIER_ACCEPTED"
+    assert r.row["supplier"] == "fragment"
+    assert r.row["days"] == expected
+
+
+async def test_fragment_stars_rejected_when_username_not_found(run):
+    r = await run(purchase(goods_id="5560001", options=[USERNAME_OPT]), username_ok=False)
+
+    assert r.stars is None
+    assert r.row["status"] == "ERROR"
+    assert r.row["platform"] == "digiseller"
+    assert "@durov" in r.error_message
     assert r.scheduled == []
 
 
