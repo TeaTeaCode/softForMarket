@@ -67,6 +67,14 @@ async def update_supplier_by_ucode(
         await session.commit()
 
 
+async def mark_order_done(session: AsyncSession, unique_code: str) -> None:
+    """Заказ закрыт и уведомление ушло — снимаем с опроса, иначе поллер тянет его вечно."""
+    await session.execute(
+        update(Purchase).where(Purchase.unique_code == unique_code, Purchase.status == "SUPPLIER_ACCEPTED").values(status="DONE")
+    )
+    await session.commit()
+
+
 async def update_supplier_by_inv(
     session: AsyncSession, inv: int, status: str | None = None, order_id: str | None = None
 ) -> None:

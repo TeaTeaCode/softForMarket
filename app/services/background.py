@@ -183,6 +183,9 @@ async def _poll_order(row: dict[str, Any]) -> None:
     if _is_final_status(saved):
         async with async_session() as session:
             if await repo.is_notified(session, unique_code, "final"):
+                # закрыт и уведомлён — снимаем с опроса, иначе крутится в батче до отсечки по возрасту
+                await repo.mark_order_done(session, unique_code)
+                logger.info(f"[ORDER-POLL] ✔ заказ закрыт, снят с опроса code={unique_code}")
                 return
         logger.info(f"[ORDER-POLL] финал без уведомления code={unique_code} — досылаем")
     if _is_order_stale(row.get("created_at")):
@@ -199,6 +202,7 @@ async def _poll_order(row: dict[str, Any]) -> None:
 
         silent = _is_status_ok(status)
         if not await repo.try_mark_notified(session, unique_code, "final"):
+            await repo.mark_order_done(session, unique_code)
             return
 
         goods_id = str(row.get("goods_id") or "")
@@ -218,6 +222,7 @@ async def _poll_order(row: dict[str, Any]) -> None:
             await repo.unmark_notified(session, unique_code, "final")
             logger.warning(f"[ORDER-POLL] уведомление не ушло code={unique_code} — повторим в следующем цикле")
             return
+        await repo.mark_order_done(session, unique_code)
         logger.info(
             f"[ORDER-POLL] финал code={unique_code} status={status.get('status') if isinstance(status, dict) else status}"
         )

@@ -203,6 +203,7 @@ async def test_order_notified_once_across_check_and_poller(sent):
         patch.object(background.repo, "try_mark_notified", AsyncMock(side_effect=try_mark)),
         patch.object(background.telegram, "send_message", AsyncMock(side_effect=send)),
         patch.object(background.repo, "get_pending_orders", AsyncMock(return_value=[row])),
+        patch.object(background.repo, "mark_order_done", AsyncMock()),
     ):
         # 1) разовая проверка застала промежуточный статус — шлёт «в процессе» под ключом started
         with patch.object(registry.fragment, "get_task_status", AsyncMock(return_value={"status": "processing"})):
@@ -221,6 +222,45 @@ async def test_order_notified_once_across_check_and_poller(sent):
         with patch.object(registry.fragment, "get_task_status", AsyncMock(return_value={"status": "failed"})):
             await background._poll_orders_once()
         assert len(sent) == 2
+
+
+async def test_poller_closes_finished_order(sent):
+    """Закрытый и уведомлённый заказ снимается с опроса, а не крутится в батче вечно."""
+    row = {
+        "unique_code": "CODE-DONE",
+        "supplier_order_id": "ord-9",
+        "supplier": "smm_panel",
+        "supplier_status": '{"status": "COMPLETED"}',  # финал уже сохранён
+        "platform": "ggsel",
+        "goods_id": "1",
+        "inv": 1,
+        "amount": 100,
+        "currency": "RUB",
+        "email": "b@x.ru",
+        "created_at": None,
+    }
+    mark_done = AsyncMock()
+    fetch = AsyncMock(return_value={"status": "COMPLETED"})
+
+    async def send(message, silent=False):
+        sent.append((message, silent))
+        return True
+
+    with (
+        patch.object(background, "async_session", FakeSession),
+        patch.object(background.repo, "get_pending_orders", AsyncMock(return_value=[row])),
+        patch.object(background.repo, "is_notified", AsyncMock(return_value=True)),  # уведомление уже ушло
+        patch.object(background.repo, "mark_order_done", mark_done),
+        patch.object(background.repo, "update_supplier_by_ucode", AsyncMock()),
+        patch.object(registry.smm_panel, "get_supplier_status", fetch),
+        patch.object(background.telegram, "send_message", AsyncMock(side_effect=send)),
+    ):
+        await background._poll_orders_once()
+
+    mark_done.assert_awaited_once()
+    assert mark_done.await_args.args[1] == "CODE-DONE"
+    assert sent == [], "повторное уведомление не нужно"
+    fetch.assert_not_awaited(), "закрытый заказ не должен дёргать поставщика"
 
 
 async def test_status_check_failure_does_not_crash():
