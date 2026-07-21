@@ -135,11 +135,19 @@ async def test_status_check_notifies_on_final_status(sent, supplier, status, hea
     assert is_silent is silent
 
 
-@pytest.mark.parametrize("status", ["pending", "processing", "awaiting_balance"])
-async def test_status_check_stays_silent_on_intermediate_status(sent, status):
-    # заказ ещё в работе — уведомит поллер, когда дойдёт до финала
+@pytest.mark.parametrize(
+    "status,header",
+    [
+        ("pending", "👌 ЗАКАЗ В ПРОЦЕССЕ ВЫПОЛНЕНИЯ"),
+        ("processing", "👌 ЗАКАЗ В ПРОЦЕССЕ ВЫПОЛНЕНИЯ"),
+        ("awaiting_balance", "💰 ОЖИДАЕТ ПОПОЛНЕНИЯ БАЛАНСА"),
+    ],
+)
+async def test_status_check_notifies_on_intermediate_status(sent, status, header):
+    # заказ ещё в работе — шлём под ключом started, финал потом дошлёт поллер
     await _run_status_check("fragment", {"status": status}, sent)
-    assert sent == []
+    assert len(sent) == 1
+    assert sent[0][0].startswith(header)
 
 
 async def test_status_check_does_not_notify_twice(sent):
@@ -196,21 +204,23 @@ async def test_order_notified_once_across_check_and_poller(sent):
         patch.object(background.telegram, "send_message", AsyncMock(side_effect=send)),
         patch.object(background.repo, "get_pending_orders", AsyncMock(return_value=[row])),
     ):
-        # 1) разовая проверка застала промежуточный статус — молчит
+        # 1) разовая проверка застала промежуточный статус — шлёт «в процессе» под ключом started
         with patch.object(registry.fragment, "get_task_status", AsyncMock(return_value={"status": "processing"})):
             await background._status_check("GGSEL", "CODE-1", "task-1", {}, "", "Товар", [], {}, "fragment")
-        assert sent == []
+        assert len(sent) == 1
+        assert sent[0][0].startswith("👌 ЗАКАЗ В ПРОЦЕССЕ ВЫПОЛНЕНИЯ")
+        assert ("CODE-1", "started") in notified
 
-        # 2) поллер видит финал — уведомляет один раз
+        # 2) промежуточное не заняло ключ final — поллер уведомляет о финале
         with patch.object(registry.fragment, "get_task_status", AsyncMock(return_value={"status": "failed"})):
             await background._poll_orders_once()
-        assert len(sent) == 1
-        assert sent[0][0].startswith("❌ ЗАКАЗ ОТМЕНЁН")
+        assert len(sent) == 2
+        assert sent[1][0].startswith("❌ ЗАКАЗ ОТМЕНЁН")
 
-        # 3) следующий цикл поллера не дублирует
+        # 3) следующий цикл поллера не дублирует финал
         with patch.object(registry.fragment, "get_task_status", AsyncMock(return_value={"status": "failed"})):
             await background._poll_orders_once()
-        assert len(sent) == 1
+        assert len(sent) == 2
 
 
 async def test_status_check_failure_does_not_crash():

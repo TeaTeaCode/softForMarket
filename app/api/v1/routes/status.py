@@ -9,10 +9,13 @@ from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.suppliers.registry import fetch_status
+from app.clients.telegram import formatting as fmt
+from app.clients.telegram.client import telegram
 from app.clients.telegram.formatting import footer_for_platform, supplier_canceled
 from app.core.config.config import config
 from app.db import repository as repo
 from app.db.session import get_session
+from app.services.background import _is_status_ok, _status_url
 from app.services.links import INVALID_TG_LINK_MSG, INVALID_TG_USERNAME_MSG, resolve_fragment_kind
 
 router = APIRouter()
@@ -55,6 +58,35 @@ def _human_status(status_obj: Any) -> tuple[str, int | None]:
         if st:
             return str(status_obj.get("status", "")).strip(), remains
     return "В работе", remains
+
+
+async def _notify_visit(session: AsyncSession, row: dict[str, Any], code: str, st_obj: Any) -> None:
+    """Уведомляет о состоянии заказа при заходе клиента на страницу статуса.
+
+    Ключи те же, что в background: 'final' у поллера, 'started' у фоновой проверки.
+    Один заказ → максимум одно промежуточное и одно финальное уведомление.
+    """
+    kind = "final" if _is_final(st_obj) else "started"
+    if not await repo.try_mark_notified(session, code, kind):
+        return
+
+    goods_id = str(row.get("goods_id") or "")
+    msg = fmt.fmt_unified_order_msg(
+        "GGSEL" if row.get("platform") == "ggsel" else "PLATI",
+        code,
+        {"inv": row.get("inv"), "id_goods": goods_id, "amount": row.get("amount"), "type_curr": row.get("currency")},
+        str(row.get("email") or ""),
+        config.services.goods_human.get(goods_id, goods_id),
+        [],
+        {"order": row.get("supplier_order_id") or "—"},
+        st_obj if isinstance(st_obj, dict) else None,
+        _status_url(code),
+    )
+    if not await telegram.send_message(msg, silent=_is_status_ok(st_obj)):
+        await repo.unmark_notified(session, code, kind)
+        logger.warning(f"[STATUS] уведомление не ушло code={code} kind={kind}")
+        return
+    logger.info(f"[STATUS] уведомление о заходе code={code} kind={kind}")
 
 
 def _is_final(status_obj: Any) -> bool:
@@ -112,6 +144,13 @@ async def status_view(
             st_obj = fresh
         except Exception as e:
             logger.warning(f"[STATUS] не удалось обновить статус code={code} order={order_id}: {type(e).__name__}: {e}")
+
+    if order_id:
+        try:
+            await _notify_visit(session, row, code, st_obj)
+        except Exception as e:
+            # уведомление не должно ломать страницу клиенту
+            logger.warning(f"[STATUS] уведомление о заходе не удалось code={code}: {type(e).__name__}: {e}")
 
     if not st_obj and order_id:
         ctx |= {
