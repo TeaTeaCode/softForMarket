@@ -16,12 +16,10 @@ goods_human:
   "102558269": "Telegram Stars"
   "102558303": "Telegram Premium"
 
-# площадка → {goods_id с фиксированным сроком → service_id поставщика}
+# площадка → {goods_id с фиксированным сроком → service_name поставщика}
 fixed_product_to_service:
   ggsel:
     "102084952": "G_BOOST_90"   # 90 дней
-    "102084946": "G_BOOST_60"   # 60 дней
-    "102084321": "G_BOOST_30"   # 30 дней
   plati:
     "5558693": "G_BOOST_90"     # 90 дней
     "5558690": "G_BOOST_60"     # 60 дней
@@ -37,19 +35,17 @@ fragment_products:
   ggsel:
     "102558269": "stars"     # Telegram Stars
     "102558303": "premium"   # Telegram Premium
-  plati:
-    "5560001": "stars"       # Telegram Stars
-    "5560002": "premium"     # Telegram Premium
+  plati: { }                  # аналогов Stars/Premium на PLATI нет
 
-# количество дней → service_id поставщика
+# количество дней → service_name поставщика
 days_to_service:
-  180: "G_BOOST_180"
-  90: "G_BOOST_90"
-  60: "G_BOOST_60"
-  30: "G_BOOST_30"
-  14: "G_BOOST_14"
-  7: "G_BOOST_7"
-  1: "G_BOOST_1"
+  180: "G_BOOST_180"  # было TeaTeaGram 115
+  90: "G_BOOST_90"    # было 114
+  60: "G_BOOST_60"    # было 138
+  30: "G_BOOST_30"    # было 71
+  14: "G_BOOST_14"    # было 144
+  7: "G_BOOST_7"      # было 143
+  1: "G_BOOST_1"      # было 77
 
 # площадка → footer на странице статуса
 footer_by_platform:

@@ -67,6 +67,15 @@ def test_invalid_link_order_shows_support_message(client):
     assert 'http-equiv="refresh"' not in r.text
 
 
+def test_terminal_supplier_delivery_problem_shows_support_without_refresh(client):
+    r = get_status(client, row(status="OUTBOX_DELIVERY_ERROR", supplier_order_id=None))
+
+    assert r.status_code == 200
+    assert "Заказ был отменён системой! Пожалуйста, свяжитесь с поддержкой." in r.text
+    assert "поставщик" not in r.text.lower()
+    assert 'http-equiv="refresh"' not in r.text
+
+
 def stars_row(**over):
     base = row(
         goods_id="102558269",

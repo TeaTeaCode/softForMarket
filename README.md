@@ -19,7 +19,8 @@ app/
   services/           # links (парсеры), orders (оркестратор), background (asyncio-задачи)
   templates/          # status.html
   main.py             # FastAPI app + lifespan
-  worker.py           # фоновый процесс (поллер чатов GGSEL)
+  worker.py           # поллеры чатов GGSEL и статусов заказов
+  outbox_worker.py    # отдельный процесс доставки Outbox-сообщений
 alembic/              # миграции
 config/               # config.yaml (логи), services.yaml (товары→услуги)
 ```
@@ -42,7 +43,9 @@ docker compose up -d --build
 
 Сервисы:
 - **app** — web (uvicorn, порт 80→8000). Масштаб через `WORKERS` (по умолчанию 2).
-- **worker** — фоновый поллер чатов GGSEL. Ровно один экземпляр (не масштабировать).
+- **worker** — фоновые поллеры чатов GGSEL и статусов заказов. Ровно один экземпляр.
+- **outbox-worker** — доставка заказов из Outbox поставщику. Запускается только после
+  успешного healthcheck `app`, то есть после применения миграций. Ровно один экземпляр.
 
 Отложенные проверки статуса заказа создаются per-request в web и не дублируются.
 
@@ -53,6 +56,7 @@ pip install -r requirements.txt
 alembic upgrade head
 uvicorn app.main:app --reload          # web
 python -m app.worker                    # фоновый процесс (отдельно)
+python -m app.outbox_worker             # доставка сообщений Outbox (отдельно)
 ```
 
 ## Эндпоинты (под `/api/v1`)

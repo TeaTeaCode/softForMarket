@@ -37,7 +37,7 @@ def include_object(obj, name, type_, reflected, compare_to):  # type: ignore[no-
     if type_ == "table":
         if name == "alembic_version":
             return False
-        if obj.schema not in (DB_SCHEMA, None):
+        if obj.schema != DB_SCHEMA:
             return False
     return True
 

@@ -134,6 +134,13 @@ async def status_view(
         ctx |= {"status_line": invalid_input_msg, "top_note": invalid_input_msg}
         return _templates.TemplateResponse(request, template, ctx)
 
+    delivery_problem_msg = {
+        "OUTBOX_DELIVERY_ERROR": "Заказ был отменён системой! Пожалуйста, свяжитесь с поддержкой.",
+    }.get(str(row.get("status") or ""))
+    if delivery_problem_msg:
+        ctx |= {"status_line": delivery_problem_msg, "top_note": delivery_problem_msg}
+        return _templates.TemplateResponse(request, template, ctx)
+
     st_obj = _safe_json(row.get("supplier_status"))
     order_id = str(row.get("supplier_order_id") or "").strip()
 

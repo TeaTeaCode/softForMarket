@@ -3,15 +3,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.platforms.ggsel import ggsel
 from app.clients.suppliers.fragment import Source
-from app.clients.suppliers.smm_panel import smm_panel
 from app.clients.telegram import formatting as fmt
 from app.core.config.config import config
 from app.db import repository as repo
-from app.services import background
 from app.services.links import extract_days_and_link, normalize_tg_link, resolve_fragment_kind, resolve_service
 from app.services.orders._common import (
     _notify,
-    _purchase_fields,
     _purchase_row,
     _quantity,
     _save_error,
@@ -19,6 +16,7 @@ from app.services.orders._common import (
     status_url,
 )
 from app.services.orders.fragment import process_fragment
+from app.services.outbox.producer import queue_smm_panel_purchase
 
 
 async def process_ggsel(session: AsyncSession, unique_code: str) -> str:
@@ -88,20 +86,36 @@ async def process_ggsel(session: AsyncSession, unique_code: str) -> str:
             )
             return unique_code
 
-        supplier = await smm_panel.create_supplier_order(service_id, str(norm_link), quantity)
-        order_id = str(supplier.get("order"))
-        purchase = _purchase_fields(data, goods_id)
-        await repo.insert_purchase(
+        purchase_row = _purchase_row(
+            "ggsel",
+            unique_code,
+            inv,
+            goods_id,
+            data,
+            email,
+            norm_link,
+            days,
+            quantity,
+            None,
+            "OUTBOX_PENDING",
+        )
+        purchase_row["supplier"] = "smm_panel"
+        queued = await queue_smm_panel_purchase(
             session,
-            _purchase_row(
-                "ggsel", unique_code, inv, goods_id, data, email, norm_link, days, quantity, order_id, "SUPPLIER_ACCEPTED"
-            ),
+            purchase_values=purchase_row,
+            source="ggsel",
+            order_key=unique_code,
+            service_name=service_id,
+            url=str(norm_link),
+            total_count=quantity,
         )
+        if queued is None:
+            logger.info(f"[GGSEL] ⏭ Outbox уже содержит заказ code={unique_code}")
+            return unique_code
         logger.success(
-            f"[GGSEL] ✔ заказ оформлен code={unique_code} inv={inv} «{goods_name}» "
-            f"service={service_id} link={norm_link} qty={quantity} order_id={order_id}"
+            f"[GGSEL] ✔ заказ поставлен в Outbox code={unique_code} inv={inv} «{goods_name}» "
+            f"service={service_id} link={norm_link} qty={quantity} outbox_id={queued.outbox_id}"
         )
-        background.schedule_status_check("GGSEL", unique_code, order_id, purchase, email, goods_name, options, supplier)
         return unique_code
     except Exception as e:
         logger.exception(f"[GGSEL] ошибка обработки {unique_code}")

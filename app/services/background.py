@@ -24,6 +24,15 @@ def _track(task: asyncio.Task) -> None:
     task.add_done_callback(_tasks.discard)
 
 
+async def stop_all() -> None:
+    tasks = tuple(_tasks)
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    _tasks.difference_update(tasks)
+
+
 def _status_url(code: str) -> str:
     return f"{settings.BASE_PUBLIC_URL}/status?code={code}"
 
@@ -74,6 +83,60 @@ def schedule_status_check(
             _status_check(platform_name, unique_code, order_id, purchase, email, goods_name, options, supplier_resp, supplier)
         )
     )
+
+
+def schedule_outbox_status_check(
+    unique_code: str,
+    order_id: str,
+    supplier_resp: dict[str, Any],
+    supplier: str,
+) -> None:
+    """Restore notification context from Purchase after an Outbox delivery commits."""
+    _track(asyncio.create_task(_outbox_status_check(unique_code, order_id, supplier_resp, supplier)))
+
+
+async def _outbox_status_check(
+    unique_code: str,
+    order_id: str,
+    supplier_resp: dict[str, Any],
+    supplier: str,
+) -> None:
+    try:
+        async with async_session() as session:
+            row = await repo.get_by_unique_code(session, unique_code)
+        if row is None:
+            logger.error(f"[OUTBOX] Purchase не найдена для проверки статуса code={unique_code} order={order_id}")
+            return
+        goods_id = str(row.get("goods_id") or "")
+        purchase = {
+            "inv": row.get("inv"),
+            "id_goods": goods_id,
+            "amount": row.get("amount"),
+            "amount_usd": row.get("amount_usd"),
+            "profit": row.get("profit"),
+            "type_curr": row.get("currency"),
+        }
+        options: list[dict[str, str]] = []
+        link = str(row.get("tg_link") or "").strip()
+        if link and link != "—":
+            options.append({"name": "Ссылка", "value": link})
+        if row.get("days") is not None:
+            options.append({"name": "Количество дней", "value": str(row["days"])})
+        await _status_check(
+            "GGSEL" if row.get("platform") == "ggsel" else "PLATI",
+            unique_code,
+            order_id,
+            purchase,
+            str(row.get("email") or ""),
+            config.services.goods_human.get(goods_id, goods_id),
+            options,
+            supplier_resp,
+            supplier,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        logger.warning(f"[OUTBOX] не удалось запланировать проверку code={unique_code} order={order_id}: {e}")
 
 
 async def _status_check(

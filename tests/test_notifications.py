@@ -272,6 +272,52 @@ async def test_status_check_failure_does_not_crash():
         await background._status_check("GGSEL", "C1", "o-1", {}, "", "", [], {}, "fragment")
 
 
+async def test_outbox_status_check_restores_purchase_context():
+    row = {
+        "platform": "ggsel",
+        "inv": 555,
+        "goods_id": "102084952",
+        "amount": 100,
+        "amount_usd": 1,
+        "profit": 10,
+        "currency": "RUB",
+        "email": "buyer@example.com",
+        "tg_link": "https://t.me/mychannel",
+        "days": 90,
+    }
+
+    with (
+        patch.object(background, "async_session", FakeSession),
+        patch.object(background.repo, "get_by_unique_code", AsyncMock(return_value=row)),
+        patch.object(background, "_status_check", AsyncMock()) as status_check,
+    ):
+        await background._outbox_status_check("CODE-1", "417", {"id": 417}, "smm_panel")
+
+    status_check.assert_awaited_once()
+    args = status_check.await_args.args
+    assert args[0] == "GGSEL"
+    assert args[1:3] == ("CODE-1", "417")
+    assert args[3]["inv"] == 555
+    assert args[4] == "buyer@example.com"
+    assert args[6] == [
+        {"name": "Ссылка", "value": "https://t.me/mychannel"},
+        {"name": "Количество дней", "value": "90"},
+    ]
+    assert args[7] == {"id": 417}
+    assert args[8] == "smm_panel"
+
+
+async def test_outbox_status_check_contains_purchase_lookup_failure():
+    with (
+        patch.object(background, "async_session", FakeSession),
+        patch.object(background.repo, "get_by_unique_code", AsyncMock(side_effect=RuntimeError("db unavailable"))),
+        patch.object(background, "_status_check", AsyncMock()) as status_check,
+    ):
+        await background._outbox_status_check("CODE-1", "417", {"id": 417}, "smm_panel")
+
+    status_check.assert_not_awaited()
+
+
 # ─── Заголовки статусов ──────────────────────────────────────────────────────
 
 

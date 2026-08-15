@@ -72,6 +72,16 @@ class Settings(BaseSettings):
     # Бросаем опрос заказа, если он старше N часов
     ORDER_POLL_MAX_AGE_HOURS: int
 
+    OUTBOX_POLL_INTERVAL: float = 1.0
+    OUTBOX_BATCH_SIZE: int = 50
+    OUTBOX_MAX_CONCURRENCY: int = 10
+    OUTBOX_LEASE_SECONDS: int = 180
+    OUTBOX_SHUTDOWN_GRACE_SECONDS: float = 30.0
+    OUTBOX_BACKOFF_BASE: float = 2.0
+    OUTBOX_BACKOFF_MAX: float = 300.0
+    OUTBOX_CLEANUP_INTERVAL: float = 3600.0
+    OUTBOX_CLEANUP_RETENTION_DAYS: int = 3
+
     # База данных (PostgreSQL через asyncpg)
     POSTGRES_HOST: str
     POSTGRES_USER: str

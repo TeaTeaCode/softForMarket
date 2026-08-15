@@ -1,9 +1,11 @@
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from app.clients.suppliers.fragment import Source
+from app.clients.suppliers.smm_panel import smm_panel
 from app.services.orders import _common as common, fragment as fragment_orders, ggsel as ggsel_orders
 from app.services.orders.ggsel import process_ggsel
 
@@ -33,6 +35,7 @@ class Run:
 
     def __init__(self):
         self.rows = []
+        self.outbox = None
         self.scheduled = []
         self.stars = None
         self.premium = None
@@ -65,6 +68,11 @@ def run(monkeypatch):
             r.smm = (service, link, qty)
             return {"order": "smm-1"}
 
+        async def queue_smm(session, **kwargs):
+            r.rows.append(kwargs["purchase_values"])
+            r.outbox = kwargs
+            return SimpleNamespace(outbox_id=1)
+
         with (
             patch.object(ggsel_orders.repo, "get_by_unique_code", AsyncMock(return_value=None)),
             patch.object(ggsel_orders.repo, "mark_inflight", AsyncMock(return_value=True)),
@@ -78,16 +86,12 @@ def run(monkeypatch):
             patch.object(fragment_orders.fragment, "check_username", AsyncMock(return_value=username_ok)),
             patch.object(fragment_orders.fragment, "create_stars_order", AsyncMock(side_effect=stars)),
             patch.object(fragment_orders.fragment, "create_premium_order", AsyncMock(side_effect=premium)),
-            patch.object(ggsel_orders.smm_panel, "create_supplier_order", AsyncMock(side_effect=smm)),
+            patch.object(smm_panel, "create_supplier_order", AsyncMock(side_effect=smm)),
+            patch.object(ggsel_orders, "queue_smm_panel_purchase", AsyncMock(side_effect=queue_smm)),
             patch.object(
                 fragment_orders.background,
                 "schedule_status_check",
                 lambda *a, **k: r.scheduled.append((a[2], k.get("supplier"))),
-            ),
-            patch.object(
-                ggsel_orders.background,
-                "schedule_status_check",
-                lambda *a, **k: r.scheduled.append((a[2], k.get("supplier", "smm_panel"))),
             ),
         ):
             await process_ggsel(None, "CODE-1")
@@ -179,12 +183,18 @@ async def test_boost_still_goes_to_smm_panel(run):
     )
     r = await run(data)
 
-    assert r.smm == ("G_BOOST_90", "https://t.me/mychannel", 1)
+    assert r.smm is None
     assert r.stars is None and r.premium is None
-    assert r.row["status"] == "SUPPLIER_ACCEPTED"
+    assert r.row["status"] == "OUTBOX_PENDING"
     assert r.row["supplier"] == "smm_panel"
+    assert r.row["supplier_order_id"] is None
     assert r.row["days"] == 90
-    assert r.scheduled == [("smm-1", "smm_panel")]
+    assert r.outbox["source"] == "ggsel"
+    assert r.outbox["order_key"] == "CODE-1"
+    assert r.outbox["service_name"] == "G_BOOST_90"
+    assert r.outbox["url"] == "https://t.me/mychannel"
+    assert r.outbox["total_count"] == 1
+    assert r.scheduled == []
 
 
 async def test_boost_invalid_link_rejected(run):

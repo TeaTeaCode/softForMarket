@@ -115,3 +115,20 @@ async def test_smm_panel_raises_without_id():
     api = _api(SmmPanelApi, lambda r: httpx.Response(200, json={"error": "no"}))
     with pytest.raises(RuntimeError, match="не принял заказ"):
         await api.create_supplier_order("G_BOOST_90", "https://t.me/chan", 1)
+
+
+async def test_existing_smm_panel_call_keeps_base_api_retries():
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(503, json={"detail": "temporary"})
+        return httpx.Response(200, json={"id": 42})
+
+    api = _api(SmmPanelApi, handler)
+    data = await api.create_supplier_order("G_BOOST_90", "https://t.me/chan", 1)
+
+    assert data["order"] == 42
+    assert calls == 2
