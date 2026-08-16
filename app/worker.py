@@ -9,9 +9,12 @@ from app.clients.suppliers.smm_panel import smm_panel
 from app.clients.suppliers.teateagram import teateagram
 from app.clients.telegram.client import telegram
 from app.core.config.config import config
+from app.core.config.settings import settings
 from app.core.logging import setup_logging
-from app.db.session import engine
+from app.db.session import async_session, engine
 from app.services import background
+from app.services.outbox.smm_panel import SmmPanelOutboxDeliverer
+from app.services.outbox.worker import OutboxWorker, OutboxWorkerConfig
 from app.services.worker_signals import install_shutdown_handlers
 
 
@@ -33,16 +36,25 @@ async def _cleanup(name: str, action: Callable[[], Awaitable[None]]) -> None:
 async def _main(stop_event: asyncio.Event | None = None) -> None:
     setup_logging(config.logging.worker_file)
     logger.info("[WORKER] старт фонового процесса")
+    deliverer: SmmPanelOutboxDeliverer | None = None
+    outbox_worker: OutboxWorker | None = None
     try:
         shutdown_event = stop_event or asyncio.Event()
         if stop_event is None:
             install_shutdown_handlers(shutdown_event)
+        deliverer = SmmPanelOutboxDeliverer()
+        outbox_worker = OutboxWorker(OutboxWorkerConfig.from_settings(settings), async_session, deliverer)
+        outbox_worker.start()
         background.start_chat_poller()
         background.start_order_poller()
         await shutdown_event.wait()
     finally:
+        if outbox_worker is not None:
+            await _cleanup("Outbox worker", outbox_worker.stop)
         await _cleanup("фоновых задач", background.stop_all)
         await _cleanup("общих HTTP-клиентов", _close_worker_clients)
+        if deliverer is not None:
+            await _cleanup("HTTP-клиента Outbox", deliverer.close)
         await _cleanup("DB engine", engine.dispose)
 
 

@@ -34,24 +34,6 @@ services:
       - .env
     command: ["python", "-m", "app.worker"]
     restart: unless-stopped
-    volumes:
-      - ./logs:/app/logs
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "100m"
-        max-file: "3"
-
-  outbox-worker:
-    platform: linux/amd64
-    image: softformarket-app
-    depends_on:
-      app:
-        condition: service_healthy
-    env_file:
-      - .env
-    command: ["python", "-m", "app.outbox_worker"]
-    restart: unless-stopped
     stop_grace_period: 3m
     volumes:
       - ./logs:/app/logs

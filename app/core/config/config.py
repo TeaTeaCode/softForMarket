@@ -9,7 +9,6 @@ class LoggingConfig(BaseModel):
     file: Path
     # отдельный файл воркера: на Windows ротация ломается, если два процесса держат один лог
     worker_file: Path
-    outbox_worker_file: Path = Path("logs/outbox-worker.log")
     console_level: str
     file_level: str
     console_format: str
