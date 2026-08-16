@@ -5,6 +5,25 @@ from pydantic import SecretStr, computed_field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
+def _normalize_proxy_url(value: str) -> str | None:
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if "://" not in normalized:
+        return f"socks5://{normalized}"
+    return normalized
+
+
+def _normalize_proxy_urls(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    parts = [part.strip() for line in value.splitlines() for part in line.split(",") if part.strip()]
+    if not parts:
+        return None
+    normalized = [_normalize_proxy_url(part) for part in parts]
+    return ",".join(item for item in normalized if item is not None)
+
+
 class Settings(BaseSettings):
     PROJECT_NAME: str
 
@@ -101,10 +120,8 @@ class Settings(BaseSettings):
 
     @field_validator("TG_PROXY_URL", mode="before")
     @classmethod
-    def empty_proxy_to_none(cls, value: object) -> object:
-        if isinstance(value, str) and not value.strip():
-            return None
-        return value
+    def normalize_proxy_url(cls, value: object) -> object:
+        return _normalize_proxy_urls(value)
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod
