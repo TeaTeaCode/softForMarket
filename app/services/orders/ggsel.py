@@ -34,6 +34,14 @@ async def process_ggsel(session: AsyncSession, unique_code: str) -> str:
         if data.get("retval") != 0:
             raise RuntimeError(f"GGSEL error: {data.get('retdesc')}")
 
+        name_invoice = str(data.get("name_invoice") or "")
+        if name_invoice and name_invoice != unique_code:
+            raise RuntimeError(f"GGSEL вернул чужой заказ: name_invoice={name_invoice}")
+
+        state = (data.get("unique_code_state") or {}).get("state")
+        if state not in (1, 3):
+            raise RuntimeError(f"Недопустимое состояние кода GGSEL: state={state}")
+
         inv = data.get("inv")
         goods_id = str(data.get("id_goods"))
         goods_name = config.services.goods_human.get(goods_id, goods_id)
