@@ -14,6 +14,13 @@ GGSEL_CHATS_URL = f"{GGSEL_BASE}/api_sellers/api/debates/v2/chats"
 GGSEL_MESSAGES_URL = f"{GGSEL_BASE}/api_sellers/api/debates/v2"
 
 
+def _proxy() -> str | None:
+    if settings.TG_PROXY_ENABLED and settings.TG_PROXY_URL is not None:
+        routes = [item for item in settings.TG_PROXY_URL.get_secret_value().split(",") if item]
+        return routes[0] if routes else None
+    return None
+
+
 class GgselApi(BaseApi):
     async def get_token(self) -> str:
         ts_ms = int(time.time() * 1000)
@@ -50,4 +57,4 @@ class GgselApi(BaseApi):
         return []
 
 
-ggsel = GgselApi()
+ggsel = GgselApi(proxy=_proxy())
