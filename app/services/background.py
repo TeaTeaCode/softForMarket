@@ -346,6 +346,11 @@ def _is_chat_fresh(chat: dict[str, Any]) -> bool:
     return last >= threshold
 
 
+def _msg_preview(msg: dict[str, Any]) -> str:
+    text = str(msg.get("message") or "")
+    return text if len(text) <= 120 else text[:200] + "…"
+
+
 async def _poll_once() -> None:
     token = await ggsel.get_token()
     for page in range(1, settings.GGSEL_CHAT_MAX_PAGES + 1):
@@ -378,14 +383,30 @@ async def _process_chat(session: AsyncSession, token: str, chat: dict[str, Any])
 
     msgs_sorted = sorted((m for m in msgs if m.get("id") is not None), key=lambda m: int(m.get("id") or 0))
 
+    logger.info(f"[GGSEL-CHAT] chat_id={chat_id} получено сообщений={len(msgs_sorted)} last_msg_id={last_id}")
+
     max_seen = last_id or 0
     to_send: list[tuple[int, dict]] = []
     for m in msgs_sorted:
         mid = int(m.get("id") or 0)
-        if last_id is not None and mid <= last_id:
+        is_buyer = int(m.get("buyer") or 0) == 1
+        is_deleted = bool(int(m.get("deleted") or 0))
+        seen_before = last_id is not None and mid <= last_id
+        if seen_before:
+            skip = "уже видели"
+        elif not is_buyer:
+            skip = "от продавца"
+        elif is_deleted:
+            skip = "удалено"
+        else:
+            skip = ""
+        author = "покупатель" if is_buyer else "продавец"
+        suffix = f" ⏭ {skip}" if skip else " → в TG"
+        logger.info(f"[GGSEL-CHAT] chat_id={chat_id} msg={mid} {author} текст={_msg_preview(m)!r}{suffix}")
+        if seen_before:
             continue
         max_seen = max(max_seen, mid)
-        if int(m.get("buyer") or 0) == 1 and not int(m.get("deleted") or 0):
+        if not skip:
             to_send.append((mid, m))
 
     if first_seen and settings.GGSEL_CHAT_BOOTSTRAP_SILENT:
@@ -396,9 +417,7 @@ async def _process_chat(session: AsyncSession, token: str, chat: dict[str, Any])
     email = chat.get("email") or chat.get("buyer_email") or "—"
     first_failed: int | None = None
     for mid, m in to_send:
-        text = str(m.get("message") or "")
-        preview = text if len(text) <= 120 else text[:120] + "…"
-        logger.info(f"[GGSEL-CHAT] email={email} msg={mid} текст={preview!r}")
+        logger.info(f"[GGSEL-CHAT] отправка email={email} msg={mid} текст={_msg_preview(m)!r}")
         try:
             ok = await telegram.send_message(fmt.fmt_chat_msg_for_tg(chat, m, chat_id))
         except Exception as e:
