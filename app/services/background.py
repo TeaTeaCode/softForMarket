@@ -363,6 +363,15 @@ async def _poll_once() -> None:
                     logger.warning(f"[GGSEL-CHAT] ошибка чата: {type(e).__name__}: {e}")
 
 
+def _is_from_buyer(msg: dict[str, Any]) -> bool:
+    """Сообщения продавца приходят с buyer=0 и seller=0, всё остальное — от покупателя.
+
+    Проверено экспериментом: флаги не меняются при прочтении (за это отвечает date_seen).
+    Встречается и (0, 1) у покупателя — происхождение неясно, но это не (0, 0).
+    """
+    return bool(int(msg.get("buyer") or 0) or int(msg.get("seller") or 0))
+
+
 async def _process_chat(session: AsyncSession, token: str, chat: dict[str, Any]) -> None:
     chat_id = _extract_chat_id(chat)
     if not chat_id:
@@ -385,7 +394,7 @@ async def _process_chat(session: AsyncSession, token: str, chat: dict[str, Any])
         if last_id is not None and mid <= last_id:
             continue
         max_seen = max(max_seen, mid)
-        if int(m.get("buyer") or 0) == 1 and not int(m.get("deleted") or 0):
+        if _is_from_buyer(m) and not int(m.get("deleted") or 0):
             to_send.append((mid, m))
 
     if first_seen and settings.GGSEL_CHAT_BOOTSTRAP_SILENT:

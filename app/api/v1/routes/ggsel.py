@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends
-from fastapi.responses import PlainTextResponse, RedirectResponse, Response
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse, Response
+from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session
@@ -12,6 +13,16 @@ router = APIRouter()
 @router.get("/ggsel")
 async def ggsel_callback(uniquecode: str = "", unique_code: str = "", session: AsyncSession = Depends(get_session)) -> Response:
     return await _handle(uniquecode, unique_code, session)
+
+@router.api_route("/api/v1/ggsel/precheck/boost", methods=["GET", "POST"])
+@router.api_route("/ggsel/precheck/boost", methods=["GET", "POST"])
+async def ggsel_precheck_boost(request: Request) -> Response:
+    body = (await request.body()).decode("utf-8", errors="replace")
+    logger.info(
+        f"ggsel precheck boost: method={request.method} query={dict(request.query_params)} "
+        f"headers={dict(request.headers)} body={body}"
+    )
+    return JSONResponse({"result": "ok"}, status_code=200)
 
 
 @router.get("/stars")

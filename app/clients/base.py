@@ -103,7 +103,7 @@ class BaseApi:
                 took = (time.monotonic() - started) * 1000
                 logger.debug(f"[HTTP] ← {method} {url} {r.status_code} за {took:.0f}мс body={_trim(r.text)}")
                 if r.status_code in RETRY_STATUSES and attempt < retry_total:
-                    logger.warning(f"Ретрай {attempt + 1}/{retry_total}: {method} {url} -> {r.status_code} {r.text[:200]}")
+                    logger.debug(f"Ретрай {attempt + 1}/{retry_total}: {method} {url} -> {r.status_code} {r.text[:200]}")
                     last_response = r
                     await asyncio.sleep(RETRY_BACKOFF * (2**attempt))
                     continue
@@ -116,7 +116,7 @@ class BaseApi:
                 raise
             except (httpx.TransportError, httpx.TimeoutException) as exc:
                 if attempt < retry_total:
-                    logger.warning(f"Ретрай {attempt + 1}/{retry_total}: {method} {url} -> {type(exc).__name__}: {exc}")
+                    logger.debug(f"Ретрай {attempt + 1}/{retry_total}: {method} {url} -> {type(exc).__name__}: {exc}")
                     await asyncio.sleep(RETRY_BACKOFF * (2**attempt))
                     continue
                 cause = f" ({exc.__cause__!r})" if exc.__cause__ is not None else ""
