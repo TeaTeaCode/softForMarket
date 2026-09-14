@@ -32,6 +32,8 @@ class ServicesConfig(BaseModel):
     fragment_products: dict[str, dict[str, str]]
     # количество дней → service_name поставщика
     days_to_service: dict[int, str]
+    # площадка → {variant_id варианта оффера → service_name поставщика}
+    variant_to_service: dict[str, dict[str, str]]
     # площадка → footer на странице статуса
     footer_by_platform: dict[str, str]
 

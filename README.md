@@ -19,8 +19,7 @@ app/
   services/           # links (парсеры), orders (оркестратор), background (asyncio-задачи)
   templates/          # status.html
   main.py             # FastAPI app + lifespan
-  worker.py           # поллеры чатов GGSEL и статусов заказов
-  outbox_worker.py    # отдельный процесс доставки Outbox-сообщений
+  worker.py           # поллеры и доставка Outbox-сообщений
 alembic/              # миграции
 config/               # config.yaml (логи), services.yaml (товары→услуги)
 ```
@@ -29,6 +28,8 @@ config/               # config.yaml (логи), services.yaml (товары→у
 
 Все настройки — в `.env` (см. `.env.example`). Секреты: токены Telegram/GGSEL/Digiseller/TeaTeaGram,
 ключ SMM Panel (`SMM_PANEL_API_KEY`), SOCKS5-прокси для Telegram, доступ к PostgreSQL.
+Несколько Telegram-прокси задаются через запятую или перенос строки в `TG_PROXY_URL`.
+Формат каждого адреса — `host:port`; явные схемы `socks5://` и `http://` также поддерживаются.
 Каталог товаров — в `config/services.yaml` (маппинг на `service_name` поставщика SMM Panel).
 
 ## Запуск (Docker)
@@ -43,9 +44,8 @@ docker compose up -d --build
 
 Сервисы:
 - **app** — web (uvicorn, порт 80→8000). Масштаб через `WORKERS` (по умолчанию 2).
-- **worker** — фоновые поллеры чатов GGSEL и статусов заказов. Ровно один экземпляр.
-- **outbox-worker** — доставка заказов из Outbox поставщику. Запускается только после
-  успешного healthcheck `app`, то есть после применения миграций. Ровно один экземпляр.
+- **worker** — фоновые поллеры чатов GGSEL, статусов заказов и доставка Outbox-сообщений.
+  Запускается после успешного healthcheck `app`. Ровно один экземпляр.
 
 Отложенные проверки статуса заказа создаются per-request в web и не дублируются.
 
@@ -56,7 +56,6 @@ pip install -r requirements.txt
 alembic upgrade head
 uvicorn app.main:app --reload          # web
 python -m app.worker                    # фоновый процесс (отдельно)
-python -m app.outbox_worker             # доставка сообщений Outbox (отдельно)
 ```
 
 ## Эндпоинты (под `/api/v1`)

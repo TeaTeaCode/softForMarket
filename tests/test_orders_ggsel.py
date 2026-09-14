@@ -26,6 +26,7 @@ def purchase(goods_id, options, cnt="1"):
         "cnt_goods": cnt,
         "amount": 100,
         "type_curr": "RUB",
+        "unique_code_state": {"state": 1},
         "options": options,
     }
 
@@ -227,3 +228,82 @@ async def test_inflight_lock_blocks_parallel_processing():
     ):
         await process_ggsel(None, "CODE-1")
     get_purchase.assert_not_awaited()
+
+
+# ─── Подписчики (оффер 3119586: услуга определяется по variant_id) ──────────
+
+# опции — как в выгрузке GGSEL parameters_offer_3119586.csv
+SUB_LINK_OPT = {
+    "id": 7490512,
+    "name": " Пример ссылки t.me/+abc123xyz",
+    "value": "https://t.me/+abc123xyz",
+    "variant_id": None,
+}
+
+
+def service_opt(value, variant_id):
+    return {"id": 7490621, "name": "Услуга", "value": value, "variant_id": variant_id}
+
+
+@pytest.fixture
+def variant_config(monkeypatch):
+    monkeypatch.setattr(
+        ggsel_orders.config.services,
+        "variant_to_service",
+        {
+            "ggsel": {
+                "53479612": "G_SUB_3",
+                "53479616": "G_SUB_180",
+                "53479619": "G_PREM_SUB_10",
+                "53479623": "G_PREM_SUB_30",
+                "53479624": "G_PREM_SUB_45",
+            },
+            "plati": {},
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    "value,variant_id,service,days",
+    [
+        ("Обычные подписчики - 3 дня", 53479612, "G_SUB_3", 3),
+        ("Обычные подписчики - 180 дней", 53479616, "G_SUB_180", 180),
+        ("Премиум-подписчики - 30 дней", 53479623, "G_PREM_SUB_30", 30),
+        ("Премиум-подписчики - 45 дней", 53479624, "G_PREM_SUB_45", 45),
+        ("Premium subscribers - 10 days", 53479619, "G_PREM_SUB_10", 10),
+    ],
+)
+async def test_subscribers_go_to_smm_panel(run, variant_config, value, variant_id, service, days):
+    r = await run(purchase("103119587", [SUB_LINK_OPT, service_opt(value, variant_id)], cnt="500"))
+
+    assert r.stars is None and r.premium is None
+    assert r.row["status"] == "OUTBOX_PENDING"
+    assert r.row["supplier"] == "smm_panel"
+    assert r.row["days"] == days  # дни из текста — только для БД и логов
+    assert r.outbox["service_name"] == service
+    assert r.outbox["url"] == "https://t.me/+abc123xyz"
+    assert r.outbox["total_count"] == 500
+
+
+async def test_subscribers_routed_by_id_not_by_title(run, variant_config):
+    # вариант переименован в GGSEL — маршрут не меняется
+    r = await run(purchase("103119587", [SUB_LINK_OPT, service_opt("Подписчики PRO", 53479623)]))
+
+    assert r.outbox["service_name"] == "G_PREM_SUB_30"
+
+
+async def test_subscribers_rejected_on_unknown_variant(run, variant_config):
+    r = await run(purchase("103119587", [SUB_LINK_OPT, service_opt("Новый тариф", 99999999)]))
+
+    assert r.outbox is None
+    assert r.row["status"] == "ERROR"
+    assert "service_id" in r.error_message
+    assert "99999999" in r.error_message
+
+
+async def test_subscribers_invalid_link_rejected(run, variant_config):
+    options = [{**SUB_LINK_OPT, "value": "не ссылка"}, service_opt("Премиум-подписчики - 30 дней", 53479623)]
+    r = await run(purchase("103119587", options))
+
+    assert r.outbox is None
+    assert r.row["status"] == "ERROR_INVALID_LINK"

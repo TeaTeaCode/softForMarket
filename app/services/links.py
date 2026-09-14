@@ -100,6 +100,8 @@ def extract_days_and_link(options: Any) -> tuple[int | None, str | None]:
             for k in (
                 "количество дней",
                 "кол-во дней",
+                "услуга",
+                "service",
                 "срок",
                 "дней",
                 "дни",
@@ -116,10 +118,26 @@ def extract_days_and_link(options: Any) -> tuple[int | None, str | None]:
                 days = parsed
 
         vstr = str(val or "").strip()
-        if vstr and ("ссылка" in name or "link" in name or "t.me/" in vstr):
+        if vstr and ("ссылк" in name or "link" in name or "t.me/" in vstr):
             link = vstr
 
     return days, link
+
+
+def extract_variant_ids(options: Any) -> list[str]:
+    """id выбранных вариантов оффера — по ним определяется услуга."""
+    if not isinstance(options, list):
+        return []
+
+    ids = []
+    for opt in options:
+        try:
+            variant_id = opt.get("variant_id")
+        except AttributeError:
+            continue
+        if variant_id is not None and str(variant_id).strip():
+            ids.append(str(variant_id).strip())
+    return ids
 
 
 def extract_username(raw: Any) -> tuple[str | None, str | None]:
@@ -196,9 +214,14 @@ def resolve_fragment_kind(platform: str, goods_id: str) -> str | None:
     return config.services.fragment_products.get(platform.lower().strip(), {}).get(str(goods_id))
 
 
-def resolve_service(platform: str, goods_id: str, days: int | None) -> str | None:
+def resolve_service(platform: str, goods_id: str, days: int | None, variant_ids: list[str] | None = None) -> str | None:
     """platform: 'ggsel' | 'plati'. Возвращает service_name поставщика или None."""
     p = platform.lower().strip()
+    # вариант оффера важнее товара: один goods_id может продавать разные услуги
+    by_variant = config.services.variant_to_service.get(p, {})
+    for variant_id in variant_ids or []:
+        if service := by_variant.get(variant_id):
+            return service
     fixed = config.services.fixed_product_to_service.get(p, {}).get(str(goods_id))
     if fixed:
         return fixed

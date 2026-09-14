@@ -8,7 +8,13 @@ from app.clients.telegram import formatting as fmt
 from app.core.config.config import config
 from app.db import repository as repo
 from app.services import background
-from app.services.links import extract_days_and_link, normalize_tg_link, resolve_fragment_kind, resolve_service
+from app.services.links import (
+    extract_days_and_link,
+    extract_variant_ids,
+    normalize_tg_link,
+    resolve_fragment_kind,
+    resolve_service,
+)
 from app.services.orders._common import (
     _finish_inv,
     _int_or_none,
@@ -45,6 +51,7 @@ async def process_digiseller(session: AsyncSession, unique_code: str) -> str:
         purchase, options, email, goods_id = _normalize_digi(data)
         goods_name = config.services.goods_human.get(goods_id, goods_id)
         days, link = extract_days_and_link(options)
+        variant_ids = extract_variant_ids(options)
         quantity = _quantity(purchase.get("cnt_goods"))
         inv = _int_or_none(purchase.get("inv"))
 
@@ -72,9 +79,9 @@ async def process_digiseller(session: AsyncSession, unique_code: str) -> str:
             )
             return unique_code
 
-        service_id = resolve_service("plati", goods_id, days)
+        service_id = resolve_service("plati", goods_id, days, variant_ids)
         if not service_id:
-            err = f"Не удалось определить service_id (goods_id={goods_id}, days={days})"
+            err = f"Не удалось определить service_id (goods_id={goods_id}, days={days}, variants={variant_ids})"
             await _save_error(session, "digiseller", unique_code, purchase, goods_id, email, link, days, quantity, err)
             await _notify(
                 session,
