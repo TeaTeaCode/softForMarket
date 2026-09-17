@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse, Response
 from loguru import logger
@@ -14,6 +16,12 @@ router = APIRouter()
 async def ggsel_callback(uniquecode: str = "", unique_code: str = "", session: AsyncSession = Depends(get_session)) -> Response:
     return await _handle(uniquecode, unique_code, session)
 
+
+# вариант «1 день» оффера 83180
+ONE_DAY_VARIANT_ID = 33095693
+ONE_DAY_MAX_QTY = 10
+
+
 @router.api_route("/api/v1/ggsel/precheck/boost", methods=["GET", "POST"])
 @router.api_route("/ggsel/precheck/boost", methods=["GET", "POST"])
 async def ggsel_precheck_boost(request: Request) -> Response:
@@ -22,7 +30,22 @@ async def ggsel_precheck_boost(request: Request) -> Response:
         f"ggsel precheck boost: method={request.method} query={dict(request.query_params)} "
         f"headers={dict(request.headers)} body={body}"
     )
+    if _is_rejected(body):
+        logger.warning(f"ggsel precheck boost: ✖ отказ body={body}")
+        return JSONResponse({"result": "reject"}, status_code=400)
     return JSONResponse({"result": "ok"}, status_code=200)
+
+
+def _is_rejected(body: str) -> bool:
+    """Отказать в покупке? Неразобранное тело не блокируем."""
+    try:
+        data = json.loads(body)
+        quantity = float(data["product"]["cnt"])
+        variants = {opt.get("value") for opt in data.get("options", []) if opt.get("type") == "radio"}
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return False
+
+    return ONE_DAY_VARIANT_ID in variants and quantity > ONE_DAY_MAX_QTY
 
 
 @router.get("/stars")

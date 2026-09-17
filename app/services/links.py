@@ -125,7 +125,7 @@ def extract_days_and_link(options: Any) -> tuple[int | None, str | None]:
 
 
 def extract_variant_ids(options: Any) -> list[str]:
-    """id выбранных вариантов оффера — по ним определяется услуга."""
+    """id выбранных вариантов оффера."""
     if not isinstance(options, list):
         return []
 
@@ -217,7 +217,7 @@ def resolve_fragment_kind(platform: str, goods_id: str) -> str | None:
 def resolve_service(platform: str, goods_id: str, days: int | None, variant_ids: list[str] | None = None) -> str | None:
     """platform: 'ggsel' | 'plati'. Возвращает service_name поставщика или None."""
     p = platform.lower().strip()
-    # вариант оффера важнее товара: один goods_id может продавать разные услуги
+    # вариант важнее товара: один goods_id продаёт разные услуги
     by_variant = config.services.variant_to_service.get(p, {})
     for variant_id in variant_ids or []:
         if service := by_variant.get(variant_id):
