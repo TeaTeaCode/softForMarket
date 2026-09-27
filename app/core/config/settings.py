@@ -91,6 +91,15 @@ class Settings(BaseSettings):
     # Бросаем опрос заказа, если он старше N часов
     ORDER_POLL_MAX_AGE_HOURS: int
 
+    # Поллер продаж GGSEL: запускает заказы, по которым покупатель не перешёл на редирект
+    GGSEL_SALES_POLL_INTERVAL: int = 60
+    # Сколько последних продаж запрашивать за цикл
+    GGSEL_SALES_POLL_TOP: int = 50
+    # Не трогаем продажу моложе N секунд — даём сработать редиректу
+    GGSEL_SALES_MIN_AGE_SECONDS: int = 300
+    # Продажи старше N часов не запускаем
+    GGSEL_SALES_MAX_AGE_HOURS: int = 24
+
     OUTBOX_POLL_INTERVAL: float = 1.0
     OUTBOX_BATCH_SIZE: int = 50
     OUTBOX_MAX_CONCURRENCY: int = 10

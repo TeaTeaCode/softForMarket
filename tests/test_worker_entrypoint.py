@@ -20,6 +20,7 @@ async def test_worker_starts_pollers_and_outbox_delivery() -> None:
         patch.object(worker_module, "OutboxWorker", return_value=outbox_worker) as worker_cls,
         patch.object(worker_module.background, "start_chat_poller") as start_chat,
         patch.object(worker_module.background, "start_order_poller") as start_orders,
+        patch.object(worker_module.sales_poller, "start_sales_poller") as start_sales,
         patch.object(
             worker_module.background,
             "stop_all",
@@ -41,6 +42,7 @@ async def test_worker_starts_pollers_and_outbox_delivery() -> None:
     outbox_worker.start.assert_called_once_with()
     start_chat.assert_called_once_with()
     start_orders.assert_called_once_with()
+    start_sales.assert_called_once_with()
     outbox_worker.stop.assert_awaited_once_with()
     stop_background.assert_awaited_once_with()
     close_clients.assert_awaited_once_with()
@@ -62,6 +64,7 @@ async def test_worker_cleanup_continues_after_outbox_stop_failure() -> None:
         patch.object(worker_module, "OutboxWorker", return_value=outbox_worker),
         patch.object(worker_module.background, "start_chat_poller"),
         patch.object(worker_module.background, "start_order_poller"),
+        patch.object(worker_module.sales_poller, "start_sales_poller"),
         patch.object(worker_module.background, "stop_all", AsyncMock()) as stop_background,
         patch.object(worker_module, "_close_worker_clients", AsyncMock()) as close_clients,
         patch.object(worker_module, "engine", fake_engine),

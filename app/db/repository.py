@@ -38,6 +38,14 @@ async def get_by_unique_code(session: AsyncSession, unique_code: str) -> dict[st
     return {c.name: getattr(obj, c.name) for c in Purchase.__table__.columns}
 
 
+async def get_known_invs(session: AsyncSession, platform: str, invs: list[int]) -> set[int]:
+    """Какие из счетов уже есть в purchases."""
+    if not invs:
+        return set()
+    result = await session.execute(select(Purchase.inv).where(Purchase.platform == platform, Purchase.inv.in_(invs)))
+    return {int(inv) for inv in result.scalars().all() if inv is not None}
+
+
 async def get_pending_orders(session: AsyncSession, limit: int = 200) -> list[dict[str, Any]]:
     """Заказы, принятые поставщиком: у них есть order_id, но статус мог не дойти до финала."""
     # протухшие отсеиваем в SQL, иначе они занимают весь батч и вытесняют живые заказы

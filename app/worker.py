@@ -12,7 +12,7 @@ from app.core.config.config import config
 from app.core.config.settings import settings
 from app.core.logging import setup_logging
 from app.db.session import async_session, engine
-from app.services import background
+from app.services import background, sales_poller
 from app.services.outbox.smm_panel import SmmPanelOutboxDeliverer
 from app.services.outbox.worker import OutboxWorker, OutboxWorkerConfig
 from app.services.worker_signals import install_shutdown_handlers
@@ -47,6 +47,7 @@ async def _main(stop_event: asyncio.Event | None = None) -> None:
         outbox_worker.start()
         background.start_chat_poller()
         background.start_order_poller()
+        sales_poller.start_sales_poller()
         await shutdown_event.wait()
     finally:
         if outbox_worker is not None:

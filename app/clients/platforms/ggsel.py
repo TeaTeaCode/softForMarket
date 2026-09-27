@@ -12,6 +12,8 @@ GGSEL_LOGIN_URL = f"{GGSEL_BASE}/api_sellers/api/apilogin"
 GGSEL_UNIQUE_URL_TPL = f"{GGSEL_BASE}/api_sellers/api/purchases/unique-code/{{code}}"
 GGSEL_CHATS_URL = f"{GGSEL_BASE}/api_sellers/api/debates/v2/chats"
 GGSEL_MESSAGES_URL = f"{GGSEL_BASE}/api_sellers/api/debates/v2"
+GGSEL_LAST_SALES_URL = f"{GGSEL_BASE}/api_sellers/api/seller-last-sales"
+GGSEL_PURCHASE_INFO_URL_TPL = f"{GGSEL_BASE}/api_sellers/api/purchase/info/{{inv}}"
 
 
 def _proxy() -> str | None:
@@ -19,6 +21,10 @@ def _proxy() -> str | None:
         routes = [item for item in settings.TG_PROXY_URL.get_secret_value().split(",") if item]
         return routes[0] if routes else None
     return None
+
+
+def _auth_headers(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}", "locale": "ru"}
 
 
 class GgselApi(BaseApi):
@@ -38,6 +44,24 @@ class GgselApi(BaseApi):
         result: dict[str, Any] = await self.request("GET", url, headers={"Authorization": f"Bearer {token}"})
         logger.info(f"[GGSEL] заказ {code} получен")
         return result
+
+    async def get_last_sales(self, token: str, top: int) -> list[dict[str, Any]]:
+        """Последние продажи, новые первыми: [{invoice_id, date, product: {id, name, …}}]."""
+        params = {"token": token, "seller_id": settings.GGSEL_SELLER_ID, "top": top}
+        data = await self.request("GET", GGSEL_LAST_SALES_URL, params=params, headers=_auth_headers(token))
+        if data.get("retval") != 0:
+            raise RuntimeError(f"GGSEL seller-last-sales: {data.get('retdesc')}")
+        sales: list[dict[str, Any]] = data.get("sales") or []
+        return sales
+
+    async def get_purchase_info(self, token: str, inv: int) -> dict[str, Any]:
+        """Заказ по номеру счёта. unique_code лежит в content.name."""
+        url = GGSEL_PURCHASE_INFO_URL_TPL.format(inv=inv)
+        data = await self.request("GET", url, params={"token": token}, headers=_auth_headers(token))
+        if data.get("retval") != 0:
+            raise RuntimeError(f"GGSEL purchase/info inv={inv}: {data.get('retdesc')}")
+        content: dict[str, Any] = data.get("content") or {}
+        return content
 
     async def get_chats(self, token: str, filter_new: int = 1, pagesize: int = 100, page: int = 1) -> dict[str, Any]:
         params: dict[str, Any] = {"token": token, "filter_new": filter_new, "pagesize": pagesize, "page": page}
