@@ -1,6 +1,6 @@
 import pytest
 
-from app.api.v1.routes.status import _human_status, _is_final
+from app.api.v1.routes.status import _human_status, _is_final, _service_label
 from app.services.background import _is_status_ok
 
 # Статусы Fragment: pending | processing | awaiting_balance | success | failed
@@ -77,3 +77,19 @@ def test_error_field_makes_notification_loud():
 def test_unknown_status_passed_through_to_client():
     line, _ = _human_status({"status": "какой-то новый статус"})
     assert line == "какой-то новый статус"
+
+
+@pytest.mark.parametrize(
+    "service,expected",
+    [
+        ("G_BOOST_30", "Буст"),
+        ("G_SUB_7", "Подписчики"),
+        ("G_PREM_SUB_180", "Премиум подписчики"),
+    ],
+)
+def test_service_label_by_service_name(service, expected):
+    assert _service_label({"service": service, "goods_id": "103119587"}) == expected
+
+
+def test_service_label_falls_back_to_goods_name_for_old_orders():
+    assert _service_label({"service": None, "goods_id": "unknown"}) == "unknown"

@@ -77,19 +77,6 @@ async def mark_order_done(session: AsyncSession, unique_code: str) -> None:
     await session.commit()
 
 
-async def update_supplier_by_inv(
-    session: AsyncSession, inv: int, status: str | None = None, order_id: str | None = None
-) -> None:
-    values: dict[str, Any] = {}
-    if order_id is not None:
-        values["supplier_order_id"] = order_id
-    if status is not None:
-        values["supplier_status"] = status
-    if values:
-        await session.execute(update(Purchase).where(Purchase.inv == inv).values(**values))
-        await session.commit()
-
-
 # ─── inflight по unique_code (GGSEL) ─────────────────────────────────────────
 
 
@@ -159,11 +146,6 @@ async def save_supplier_order(session: AsyncSession, inv: int, order_id: str) ->
     )
     await session.execute(stmt)
     await session.commit()
-
-
-async def get_supplier_order(session: AsyncSession, inv: int) -> str | None:
-    result = await session.execute(select(SupplierOrder.order_id).where(SupplierOrder.inv == inv))
-    return result.scalars().first()
 
 
 # ─── notified (анти-спам) ────────────────────────────────────────────────────

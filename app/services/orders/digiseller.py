@@ -165,7 +165,8 @@ async def process_digiseller(session: AsyncSession, unique_code: str) -> str:
                 quantity,
                 str(order_id),
                 "SUPPLIER_ACCEPTED",
-            ),
+            )
+            | {"service": service_id},
         )
         await _finish_inv(session, inv)  # PLATI не должна ретраить после add
 

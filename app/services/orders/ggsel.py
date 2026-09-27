@@ -115,6 +115,7 @@ async def process_ggsel(session: AsyncSession, unique_code: str) -> str:
             "OUTBOX_PENDING",
         )
         purchase_row["supplier"] = "smm_panel"
+        purchase_row["service"] = service_id
         queued = await queue_smm_panel_purchase(
             session,
             purchase_values=purchase_row,

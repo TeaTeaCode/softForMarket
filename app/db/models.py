@@ -26,6 +26,7 @@ class Purchase(Base):
     days: Mapped[int | None] = mapped_column(Integer)
     quantity: Mapped[int | None] = mapped_column(Integer)
     supplier: Mapped[str | None] = mapped_column(String)  # 'teateagram' | 'smm_panel'
+    service: Mapped[str | None] = mapped_column(String)  # service_name поставщика: G_BOOST_30, G_SUB_7, …
     supplier_order_id: Mapped[str | None] = mapped_column(String)
     supplier_status: Mapped[str | None] = mapped_column(String)
     status: Mapped[str | None] = mapped_column(String)

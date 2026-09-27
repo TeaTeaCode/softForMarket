@@ -33,6 +33,24 @@ def _safe_json(s: Any) -> Any:
         return s
 
 
+# префикс service_name → тип услуги для клиента
+_SERVICE_LABELS = {
+    "G_BOOST_": "Буст",
+    "G_SUB_": "Подписчики",
+    "G_PREM_SUB_": "Премиум подписчики",
+}
+
+
+def _service_label(row: dict[str, Any]) -> str:
+    """Тип услуги по service_name; для старых заказов без service — название товара."""
+    service = str(row.get("service") or "")
+    for prefix, label in _SERVICE_LABELS.items():
+        if service.startswith(prefix):
+            return label
+    goods_id = str(row.get("goods_id") or "")
+    return config.services.goods_human.get(goods_id, goods_id)
+
+
 def _human_status(status_obj: Any) -> tuple[str, int | None]:
     """Человекочитаемый статус и остаток для клиента."""
     remains: int | None = None
@@ -114,7 +132,7 @@ async def status_view(
     kind = resolve_fragment_kind(str(row.get("platform") or ""), goods_id)
     template = "status_fragment.html" if str(row.get("supplier") or "") == "fragment" or kind else "status.html"
     ctx: dict[str, Any] = {
-        "goods_name": config.services.goods_human.get(goods_id, goods_id),
+        "goods_name": _service_label(row),
         "days": int(row.get("days") or 0),
         "quantity": int(row.get("quantity") or 1),
         "link": row.get("tg_link") or "—",

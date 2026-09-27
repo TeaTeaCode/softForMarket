@@ -1,13 +1,10 @@
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
-from starlette.responses import Response
 
 from app.api.v1.api import api_router
 from app.clients.platforms.digiseller import digiseller
@@ -18,18 +15,6 @@ from app.clients.suppliers.teateagram import teateagram
 from app.clients.telegram.client import telegram
 from app.core.config.settings import settings
 from app.core.logging import setup_logging
-
-
-class ProxyHeadersMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
-        if forwarded_for := request.headers.get("X-Forwarded-For"):
-            client_ip = forwarded_for.split(",")[0].strip()
-            request.scope["client"] = (client_ip, request.scope["client"][1])
-        elif real_ip := request.headers.get("X-Real-IP"):
-            request.scope["client"] = (real_ip, request.scope["client"][1])
-
-        return await call_next(request)
-
 
 _STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 _HAS_STATIC = _STATIC_DIR.exists()
