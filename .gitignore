@@ -202,6 +202,7 @@ audit.yaml
 /backend/config/telegram_toolkit.yaml
 
 /certs/
+/acme/
 package-lock.json
 tmp/
 docker-compose.override.yml
