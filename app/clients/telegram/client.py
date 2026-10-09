@@ -31,7 +31,7 @@ class TelegramApi:
             if isinstance(result, BaseException):
                 logger.opt(exception=result).error(f"[TG] ошибка закрытия HTTP-клиента: {result}")
 
-    async def send_message(self, text: str, silent: bool = False) -> bool:
+    async def send_message(self, text: str, silent: bool = True) -> bool:
         payload = {
             "chat_id": settings.TG_CHAT_ID,
             "text": text,

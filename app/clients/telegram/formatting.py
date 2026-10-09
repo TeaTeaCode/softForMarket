@@ -5,6 +5,8 @@ from app.core.config.config import config
 
 _TZ_SUFFIX_RE = re.compile(r"(?:Z|[+\-]\d{2}:?\d{2})$")
 
+DONE_HEADER = "✅ ЗАКАЗ ВЫПОЛНЕН"
+
 
 def html_escape(s: Any) -> str:
     if s is None:
@@ -31,11 +33,11 @@ def footer_for_platform(platform: str) -> str:
 def options_to_lines(options: list) -> str:
     lines = []
     for opt in options or []:
-        name = str(opt.get("name") or "")
-        value = str(opt.get("value") or opt.get("user_data") or "")
+        name = str(opt.get("name") or "").strip()
+        value = str(opt.get("value") or opt.get("user_data") or "").strip()
         if name or value:
-            lines.append(f"— {name}: {value}")
-    return "\n".join(lines) if lines else "—"
+            lines.append(f"— {html_escape(name)}: {html_escape(value)}")
+    return "\n".join(lines)
 
 
 def supplier_canceled(status_obj: Any) -> bool:
@@ -69,7 +71,7 @@ def status_header_ru(status_json: dict[str, Any] | None) -> str:
     if status in {"canceled", "cancelled", "refunded", "refund", "failed"} or is_error or supplier_canceled(status_json):
         return "❌ ЗАКАЗ ОТМЕНЁН"
     if status in {"completed", "success", "done", "finished"}:
-        return "✅ ЗАКАЗ ВЫПОЛНЕН"
+        return DONE_HEADER
     if status in {"partial"}:
         return "⚠️ ЗАКАЗ ВЫПОЛНЕН ЧАСТИЧНО"
     if status in {"paused"}:
@@ -79,6 +81,87 @@ def status_header_ru(status_json: dict[str, Any] | None) -> str:
     if status in {"pending", "inprogress", "in progress", "processing", "progress", "working"} or not status:
         return "👌 ЗАКАЗ В ПРОЦЕССЕ ВЫПОЛНЕНИЯ"
     return f"ℹ️ СТАТУС: {status_raw or 'Неизвестен'}"
+
+
+def is_done(status_json: Any) -> bool:
+    """Заказ выполнен полностью — об этом в TG не уведомляем."""
+    return isinstance(status_json, dict) and status_header_ru(status_json) == DONE_HEADER
+
+
+# ─── общий каркас уведомлений ────────────────────────────────────────────────
+# <b>ЗАГОЛОВОК</b> · ПЛОЩАДКА
+#
+# <b>Поле:</b> значение   (пустые поля пропускаются)
+# <b>Параметры:</b> опции заказа
+# ссылка на страницу статуса
+
+FAIL_HEADER = "❌ ЗАКАЗ НЕ ОФОРМЛЕН"
+CHAT_HEADER = "💬 НОВОЕ СООБЩЕНИЕ"
+
+
+def _code(value: Any) -> str | None:
+    s = str(value or "").strip()
+    return f"<code>{html_escape(s)}</code>" if s and s != "—" else None
+
+
+def _goods(name: Any, goods_id: Any) -> str | None:
+    name_s, gid = (str(x or "").strip().replace("—", "") for x in (name, goods_id))
+    if gid in ("", name_s):
+        return html_escape(name_s or gid) or None
+    return f"{html_escape(name_s or '—')} (goods_id={html_escape(gid)})"
+
+
+def _payment(p: dict[str, Any]) -> str | None:
+    currency = str(p.get("type_curr") or p.get("currency_type") or "")
+    amount = fmt_money(p.get("amount"), currency)
+    if amount == "—":
+        return None
+    parts = [amount]
+    if p.get("profit") is not None:
+        parts.append(f"выплата {fmt_money(p.get('profit'), currency)}")
+    if p.get("amount_usd") is not None:
+        parts.append(fmt_money(p.get("amount_usd"), "USD"))
+    return " · ".join(parts)
+
+
+def _compose(
+    header: str, platform: str, fields: list[tuple[str, str | None]], options: list | None, status_url: str | None
+) -> str:
+    lines = [f"<b>{html_escape(header)}</b> · {html_escape(platform)}", ""]
+    lines += [f"<b>{label}:</b> {value}" for label, value in fields if value]
+    if opts := options_to_lines(options or []):
+        lines += ["<b>Параметры:</b>", opts]
+    if status_url:
+        lines.append(f'<a href="{status_url}">Страница статуса</a>')
+    return "\n".join(lines)
+
+
+def _order_fields(p: dict[str, Any], unique_code: str, email: str, goods_name: str) -> list[tuple[str, str | None]]:
+    return [
+        ("Товар", _goods(goods_name, p.get("id_goods") or p.get("goods_id"))),
+        ("Invoice", _code(p.get("inv"))),
+        ("UniqueCode", _code(unique_code)),
+        ("Покупатель", html_escape(email).strip() or None),
+        ("Оплата", _payment(p)),
+        ("Количество", html_escape(p.get("cnt_goods")).strip() or None),
+    ]
+
+
+def _supplier_status(status_info: dict[str, Any]) -> str:
+    parts = [str(status_info.get("status", "")).strip() or "—"]
+    total = status_info.get("total_count")
+    completed = status_info.get("completed_count")
+    remaining = status_info.get("remaining_count")
+    if total is not None and completed is not None:
+        parts.append(f"выполнено {completed} из {total}")
+    if remaining not in (None, 0, "0"):
+        parts.append(f"осталось {remaining}")
+    # TeaTeaGram (старые заказы): поля добавляем только если они есть
+    for key, label in (("charge", "charge"), ("remains", "remains"), ("start_count", "start")):
+        val = str(status_info.get(key, "") or "").strip()
+        if val:
+            parts.append(f"{label}={val}")
+    return html_escape(" · ".join(parts))
 
 
 def fmt_unified_order_msg(
@@ -92,50 +175,13 @@ def fmt_unified_order_msg(
     status_info: dict[str, Any] | None,
     status_url: str,
 ) -> str:
-    header = status_header_ru(status_info)
-    opts_block = options_to_lines(options)
-    order_id = supplier_resp.get("order") or supplier_resp.get("order_id") or supplier_resp.get("id") or "—"
-    amount_usd = p.get("amount_usd")
-    profit = p.get("profit")
-    currency = str(p.get("type_curr") or p.get("currency_type") or "")
-    inv = p.get("inv", "—")
-    goods_id = str(p.get("id_goods") or p.get("goods_id") or "—")
-
-    line_money = f"• <b>Оплата {platform_name}</b>: {fmt_money(p.get('amount'), currency)}"
-    if profit is not None:
-        line_money += f" | <b>Выплата</b>: {fmt_money(profit, currency)}"
-    if amount_usd is not None:
-        line_money += f" ({fmt_money(amount_usd, 'USD')})"
-
-    lines = [
-        header,
-        f"ℹ️ <b>{platform_name} → заказ оформлен</b>",
-        f"<b>Товар:</b> {goods_name} (goods_id={goods_id})",
-        f"<b>Invoice</b>: {inv}",
-        f"<b>UniqueCode:</b> <code>{unique_code}</code>",
-        line_money,
-        f"<b>ID заказа у поставщика:</b> <code>{order_id}</code>",
-        f'<b>Проверка статуса:</b> <a href="{status_url}">{status_url}</a>',
-        f"<b>Подробности:</b>\n{opts_block}",
+    order_id = supplier_resp.get("order") or supplier_resp.get("order_id") or supplier_resp.get("id")
+    fields = [
+        *_order_fields(p, unique_code, email, goods_name),
+        ("Заказ поставщика", _code(order_id)),
+        ("Статус поставщика", _supplier_status(status_info) if status_info else None),
     ]
-
-    if status_info:
-        parts = [str(status_info.get("status", "")).strip() or "—"]
-        total = status_info.get("total_count")
-        completed = status_info.get("completed_count")
-        remaining = status_info.get("remaining_count")
-        if total is not None and completed is not None:
-            parts.append(f"выполнено {completed} из {total}")
-        if remaining not in (None, 0, "0"):
-            parts.append(f"осталось {remaining}")
-        # TeaTeaGram (старые заказы): поля добавляем только если они есть
-        for key, label in (("charge", "charge"), ("remains", "remains"), ("start_count", "start")):
-            val = str(status_info.get(key, "") or "").strip()
-            if val:
-                parts.append(f"{label}={val}")
-        lines.append(f"<b>Статус поставщика:</b> {' | '.join(parts)}")
-
-    return "\n".join(lines) + "\n"
+    return _compose(status_header_ru(status_info), platform_name, fields, options, status_url)
 
 
 def fmt_failure_msg(
@@ -153,34 +199,14 @@ def fmt_failure_msg(
     quantity: int | None = None,
     service_id: str | int | None = None,
 ) -> str:
-    opts_block = options_to_lines(options)
-    currency = str(p.get("type_curr") or p.get("currency_type") or "")
-    qty = "—" if quantity is None else str(quantity)
-
-    lines = [
-        f"❌ <b>Не удалось оформить заказ у поставщика</b> ({platform_name})",
-        f"<b>Товар:</b> {goods_name} <i>(goods_id={p.get('id_goods') or p.get('goods_id') or '—'})</i>",
-        f"<b>Invoice:</b> {p.get('inv', '—')!s}",
-        f"<b>UniqueCode:</b> <code>{unique_code}</code>",
-        f"<b>Сумма:</b> {p.get('amount') or '—'!s} {currency}",
-        f"<b>Количество (cnt_goods):</b> {qty}",
-        f"<b>Email покупателя:</b> {email or '—'}",
-        f"<b>Ошибка:</b> <code>{error_text}</code>",
-        f'<b>Проверка статуса:</b> <a href="{status_url}">{status_url}</a>',
-        f"<b>Подробности (options):</b>\n{opts_block}",
+    fields = [("Ошибка", html_escape(error_text).strip() or None)]
+    fields += _order_fields(p | {"cnt_goods": quantity}, unique_code, email, goods_name)
+    fields += [
+        ("Ссылка", html_escape(link).strip() if link and link != "—" else None),
+        ("Дней", None if days is None else str(days)),
+        ("Услуга", _code(service_id)),
     ]
-
-    extra = []
-    if link:
-        extra.append(f"<b>Ссылка:</b> {link}")
-    if days is not None:
-        extra.append(f"<b>Дней:</b> {days!s}")
-    if service_id is not None:
-        extra.append(f"<b>service_id:</b> {service_id!s}")
-    if extra:
-        lines.append("\n".join(extra))
-
-    return "\n".join(lines) + "\n"
+    return _compose(FAIL_HEADER, platform_name, fields, options, status_url)
 
 
 def _clean_date(s: str) -> str:
@@ -192,43 +218,31 @@ def _clean_date(s: str) -> str:
 
 def fmt_chat_msg_for_tg(chat: dict[str, Any], msg: dict[str, Any], id_i: int) -> str:
     """Форматирование пересылаемого сообщения из чата GGSEL."""
-    buyer_email = chat.get("email") or chat.get("buyer_email") or chat.get("buyer") or "—"
+    buyer_email = chat.get("email") or chat.get("buyer_email") or chat.get("buyer") or ""
     buyer_name = chat.get("name") or chat.get("buyer_name") or ""
-    goods_id = chat.get("id_goods") or chat.get("goods_id") or chat.get("item_id") or ""
-    goods_name = chat.get("name_goods") or chat.get("goods_name") or ""
+    buyer = " ".join(str(x).strip() for x in (buyer_name, buyer_email) if x and str(x).strip() != "—")
 
-    text = str(msg.get("message") or "")
-    date_w = _clean_date(str(msg.get("date_written") or ""))
-    is_file = bool(msg.get("is_file"))
-    is_img = bool(msg.get("is_img"))
     filename = msg.get("filename") or ""
     url = msg.get("url") or ""
-    preview = msg.get("preview") or ""
+    attachment = None
+    if msg.get("is_img"):
+        attachment = ("Изображение", html_escape(url or msg.get("preview") or "") or "—")
+    elif msg.get("is_file"):
+        attachment = ("Файл", f"{html_escape(filename) or '—'} — {html_escape(url) or '—'}")
 
-    from_line = html_escape(buyer_name).strip()
-    if buyer_email and str(buyer_email) != "—":
-        from_line = (from_line + " " if from_line else "") + html_escape(buyer_email)
-    if not from_line:
-        from_line = "—"
-
-    parts = [
-        "💬 <b>Новое сообщение GGSEL</b>",
-        f"<b>От:</b> {from_line}",
+    fields = [
+        ("Покупатель", html_escape(buyer) or None),
+        ("Товар", _goods(chat.get("name_goods") or chat.get("goods_name"), chat.get("id_goods") or chat.get("goods_id"))),
+        ("Чат", _code(id_i)),
+        ("Дата", html_escape(_clean_date(str(msg.get("date_written") or ""))) or None),
     ]
-    if goods_id or goods_name:
-        parts.append(f"<b>Товар:</b> {html_escape(goods_name or '—')} (goods_id={html_escape(goods_id or '—')})")
-    parts.append(f"<b>Чат:</b> id_i=<code>{id_i}</code>")
-    if date_w:
-        parts.append(f"<b>Дата:</b> {html_escape(date_w)}")
+    if attachment:
+        fields.append(attachment)
 
-    if is_img:
-        parts.append(f"🖼 <b>Изображение:</b> {html_escape(url or preview) or '—'}")
-    elif is_file:
-        parts.append(f"📎 <b>Файл:</b> {html_escape(filename) or '—'} — {html_escape(url) or '—'}")
-
-    if text:
+    text = _compose(CHAT_HEADER, "GGSEL", fields, None, None)
+    body = str(msg.get("message") or "")
+    if body:
         # обрезаем под лимит Telegram (4096)
-        t = text if len(text) <= 3500 else text[:3500] + "…"
-        parts.append(f"<b>Текст:</b>\n{html_escape(t)}")
-
-    return "\n".join(parts)
+        body = body if len(body) <= 3500 else body[:3500] + "…"
+        text += f"\n<b>Текст:</b>\n{html_escape(body)}"
+    return text

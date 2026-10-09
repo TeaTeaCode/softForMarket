@@ -37,33 +37,6 @@ def _status_url(code: str) -> str:
     return f"{settings.BASE_PUBLIC_URL}/status?code={code}"
 
 
-def _is_status_ok(status_obj: Any) -> bool:
-    """True → тихое уведомление; False → со звуком. Неизвестный статус трактуем как громкий."""
-    if not status_obj:
-        return True
-    try:
-        if fmt.supplier_canceled(status_obj):
-            return False
-        if isinstance(status_obj, dict):
-            st = str(status_obj.get("status", "")).strip().lower()
-            is_error = bool(status_obj.get("error")) or ("error" in st)
-            if is_error or st in {
-                "canceled",
-                "cancelled",
-                "refunded",
-                "refund",
-                "failed",
-                "error",
-                "partial",
-                "paused",
-                "awaiting_balance",
-            }:
-                return False
-    except (AttributeError, TypeError):
-        return False
-    return True
-
-
 # ─── отложенная проверка статуса ──────────────────────────────────────────────
 
 
@@ -158,6 +131,9 @@ async def _status_check(
             await repo.update_supplier_by_ucode(session, unique_code, json.dumps(status, ensure_ascii=False))
             # промежуточный статус шлём под своим ключом, иначе занял бы final и поллер смолчал бы на завершении
             kind = "final" if _is_final_status(status) else "started"
+            # «выполнен» не шлём, но метку ставим — по ней поллер закроет заказ
+            if not await repo.try_mark_notified(session, unique_code, kind) or fmt.is_done(status):
+                return
             msg = fmt.fmt_unified_order_msg(
                 platform_name,
                 unique_code,
@@ -169,8 +145,7 @@ async def _status_check(
                 status,
                 _status_url(unique_code),
             )
-            silent = _is_status_ok(status)
-            if await repo.try_mark_notified(session, unique_code, kind) and not await telegram.send_message(msg, silent=silent):
+            if not await telegram.send_message(msg):
                 await repo.unmark_notified(session, unique_code, kind)
                 logger.warning(f"[BG] уведомление не ушло code={unique_code} kind={kind} — дошлёт поллер")
     except Exception as e:
@@ -263,9 +238,12 @@ async def _poll_order(row: dict[str, Any]) -> None:
         if not _is_final_status(status):
             return
 
-        silent = _is_status_ok(status)
         if not await repo.try_mark_notified(session, unique_code, "final"):
             await repo.mark_order_done(session, unique_code)
+            return
+        if fmt.is_done(status):
+            await repo.mark_order_done(session, unique_code)
+            logger.info(f"[ORDER-POLL] ✔ заказ выполнен code={unique_code}, без уведомления")
             return
 
         goods_id = str(row.get("goods_id") or "")
@@ -280,7 +258,7 @@ async def _poll_order(row: dict[str, Any]) -> None:
             status,
             _status_url(unique_code),
         )
-        if not await telegram.send_message(msg, silent=silent):
+        if not await telegram.send_message(msg):
             # иначе следующий цикл сочтёт заказ уведомлённым
             await repo.unmark_notified(session, unique_code, "final")
             logger.warning(f"[ORDER-POLL] уведомление не ушло code={unique_code} — повторим в следующем цикле")
@@ -409,7 +387,7 @@ async def _process_chat(session: AsyncSession, token: str, chat: dict[str, Any])
         preview = text if len(text) <= 120 else text[:120] + "…"
         logger.info(f"[GGSEL-CHAT] email={email} msg={mid} текст={preview!r}")
         try:
-            ok = await telegram.send_message(fmt.fmt_chat_msg_for_tg(chat, m, chat_id))
+            ok = await telegram.send_message(fmt.fmt_chat_msg_for_tg(chat, m, chat_id), silent=False)
         except Exception as e:
             logger.warning(f"[GGSEL-CHAT] не отправлено chat_id={chat_id} msg={mid}: {e}")
             ok = False

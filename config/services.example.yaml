@@ -13,6 +13,8 @@ goods_human:
   "5558688": "Бусты 30 дней"
   # PLATI range
   "5534877": "Бусты 1–180 дней"
+  # PLATI подписчики
+  "6218292": "Подписчики Telegram"
   # GGSEL Fragment
   "102558269": "Telegram Stars"
   "102558303": "Telegram Premium"
@@ -74,7 +76,24 @@ variant_to_service:
     "53479625": "G_PREM_SUB_60"
     "53479626": "G_PREM_SUB_90"
     "53479627": "G_PREM_SUB_180"
-  plati: { }
+  plati:
+    # товар 6218292 «Подписчики»
+    "35064828": "G_SUB_3"
+    "35064829": "G_SUB_7"
+    "35064832": "G_SUB_30"
+    "35064833": "G_SUB_90"
+    "35064834": "G_SUB_180"
+    "35064836": "G_PREM_SUB_3"
+    "35064837": "G_PREM_SUB_7"
+    "35064838": "G_PREM_SUB_10"
+    "35064840": "G_PREM_SUB_15"
+    "35064841": "G_PREM_SUB_20"
+    "35064842": "G_PREM_SUB_25"
+    "35064843": "G_PREM_SUB_30"
+    "35064844": "G_PREM_SUB_45"
+    "35064845": "G_PREM_SUB_60"
+    "35064846": "G_PREM_SUB_90"
+    "35064848": "G_PREM_SUB_180"
 
 # площадка → footer на странице статуса
 footer_by_platform:

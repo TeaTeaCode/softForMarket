@@ -15,18 +15,18 @@ def status_url(code: str) -> str:
     return f"{settings.BASE_PUBLIC_URL}/status?code={code}"
 
 
-async def _notify(session: AsyncSession, text: str, silent: bool = False, dedupe: tuple[str, str] | None = None) -> None:
+async def _notify(session: AsyncSession, text: str, dedupe: tuple[str, str] | None = None) -> None:
     """Шлёт уведомление с дедупликацией через таблицу notified."""
     if dedupe:
         code, kind = dedupe
         if not await repo.try_mark_notified(session, code, kind):
             logger.info(f"[TG] пропуск дубля уведомления code={code} kind={kind}")
             return
-    ok = await telegram.send_message(text, silent=silent)
+    ok = await telegram.send_message(text)
     # метка ставится до отправки — иначе право на повтор потеряно
     if not ok and dedupe:
         await repo.unmark_notified(session, *dedupe)
-    logger.info(f"[TG] {'отправлено' if ok else 'НЕ ОТПРАВЛЕНО'} silent={silent} dedupe={dedupe} text={text!r}")
+    logger.info(f"[TG] {'отправлено' if ok else 'НЕ ОТПРАВЛЕНО'} dedupe={dedupe} text={text!r}")
 
 
 def _quantity(raw: Any) -> int:

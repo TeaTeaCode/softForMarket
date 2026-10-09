@@ -15,7 +15,7 @@ from app.clients.telegram.formatting import footer_for_platform, supplier_cancel
 from app.core.config.config import config
 from app.db import repository as repo
 from app.db.session import get_session
-from app.services.background import _is_status_ok, _status_url
+from app.services.background import _status_url
 from app.services.links import INVALID_TG_LINK_MSG, INVALID_TG_USERNAME_MSG, resolve_fragment_kind
 
 router = APIRouter()
@@ -85,7 +85,7 @@ async def _notify_visit(session: AsyncSession, row: dict[str, Any], code: str, s
     Один заказ → максимум одно промежуточное и одно финальное уведомление.
     """
     kind = "final" if _is_final(st_obj) else "started"
-    if not await repo.try_mark_notified(session, code, kind):
+    if not await repo.try_mark_notified(session, code, kind) or fmt.is_done(st_obj):
         return
 
     goods_id = str(row.get("goods_id") or "")
@@ -100,7 +100,7 @@ async def _notify_visit(session: AsyncSession, row: dict[str, Any], code: str, s
         st_obj if isinstance(st_obj, dict) else None,
         _status_url(code),
     )
-    if not await telegram.send_message(msg, silent=_is_status_ok(st_obj)):
+    if not await telegram.send_message(msg):
         await repo.unmark_notified(session, code, kind)
         logger.warning(f"[STATUS] уведомление не ушло code={code} kind={kind}")
         return

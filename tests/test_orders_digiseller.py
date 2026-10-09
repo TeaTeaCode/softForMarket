@@ -211,6 +211,47 @@ async def test_supplier_exception_notifies_without_row(run):
     assert r.scheduled == []
 
 
+# ─── Подписчики (товар 6218292: услуга определяется по variant_id) ───────────
+
+SUB_LINK_OPT = {"id": 1, "name": "Пример ссылки t.me/+abc123xyz", "value": "https://t.me/+abc123xyz", "variant_id": None}
+
+
+def service_opt(value, variant_id):
+    return {"id": 2, "name": "Услуга", "value": value, "variant_id": variant_id}
+
+
+@pytest.fixture
+def variant_config(monkeypatch):
+    monkeypatch.setattr(
+        digi_orders.config.services,
+        "variant_to_service",
+        {"ggsel": {}, "plati": {"35064828": "G_SUB_3", "35064843": "G_PREM_SUB_30", "35064848": "G_PREM_SUB_180"}},
+    )
+
+
+@pytest.mark.parametrize(
+    "value,variant_id,service",
+    [
+        ("Обычные подписчики - 3 дня", 35064828, "G_SUB_3"),
+        ("Премиум-подписчики - 30 дней", 35064843, "G_PREM_SUB_30"),
+        ("Premium subscribers - 180 days", 35064848, "G_PREM_SUB_180"),
+    ],
+)
+async def test_subscribers_go_to_smm_panel(run, variant_config, value, variant_id, service):
+    r = await run(purchase("6218292", [SUB_LINK_OPT, service_opt(value, variant_id)], cnt_goods="500"))
+
+    assert r.smm == (service, "https://t.me/+abc123xyz", 500)
+    assert r.row["status"] == "SUPPLIER_ACCEPTED"
+    assert r.row["service"] == service
+
+
+async def test_subscribers_routed_by_id_not_by_title(run, variant_config):
+    # кнопка переименована в Digiseller — маршрут не меняется
+    r = await run(purchase("6218292", [SUB_LINK_OPT, service_opt("Подписчики PRO", 35064843)]))
+
+    assert r.smm[0] == "G_PREM_SUB_30"
+
+
 # ─── Fragment (Stars/Premium через PLATI) ────────────────────────────────────
 
 

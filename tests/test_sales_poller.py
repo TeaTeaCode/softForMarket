@@ -43,7 +43,6 @@ def poll():
         mocks = {
             "info": info_mock,
             "process": AsyncMock(),
-            "send": AsyncMock(return_value=True),
         }
         with (
             patch.object(sales_poller, "async_session", FakeSession),
@@ -53,7 +52,6 @@ def poll():
             patch.object(sales_poller.repo, "get_known_invs", AsyncMock(return_value=set(known))),
             patch.object(sales_poller.repo, "get_by_unique_code", AsyncMock(return_value={"id": 1} if saved else None)),
             patch.object(sales_poller, "process_ggsel", mocks["process"]),
-            patch.object(sales_poller.telegram, "send_message", mocks["send"]),
         ):
             await sales_poller.poll_sales_once()
         return mocks
@@ -66,7 +64,6 @@ async def test_unlaunched_paid_sale_is_launched_by_its_unique_code(poll):
     m["info"].assert_awaited_once_with("tok", 100)
     m["process"].assert_awaited_once()
     assert m["process"].await_args.args[1] == "CODE-100"
-    assert "Автозапуск" in m["send"].await_args.args[0]
 
 
 async def test_sale_already_in_db_is_not_touched(poll):
@@ -102,10 +99,9 @@ async def test_sale_without_unique_code_is_not_launched(poll):
     m["process"].assert_not_awaited()
 
 
-async def test_failed_launch_is_retried_without_notification(poll):
+async def test_failed_launch_is_retried(poll):
     m = await poll([sale()], saved=False)
     m["process"].assert_awaited_once()
-    m["send"].assert_not_awaited()
     again = await poll([sale()], saved=False)
     again["process"].assert_awaited_once()
 

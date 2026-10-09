@@ -61,7 +61,6 @@ async def process_fragment(
                 message,
                 status_url(unique_code),
                 link=str(link or "—"),
-                days=months,
                 quantity=quantity,
             ),
             dedupe=(unique_code, "fail"),

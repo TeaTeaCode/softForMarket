@@ -11,8 +11,6 @@ from typing import Any
 from loguru import logger
 
 from app.clients.platforms.ggsel import ggsel
-from app.clients.telegram.client import telegram
-from app.clients.telegram.formatting import html_escape
 from app.core.config.settings import settings
 from app.db import repository as repo
 from app.db.session import async_session
@@ -103,13 +101,3 @@ async def _launch(token: str, inv: int, sale: dict[str, Any]) -> None:
     if saved is None:
         logger.warning(f"[GGSEL-SALES] inv={inv} code={code}: заказ не сохранён, повтор в следующем цикле")
         return
-    await _notify(inv, code, product)
-
-
-async def _notify(inv: int, code: str, product: str) -> None:
-    text = (
-        "⚙️ <b>Автозапуск GGSEL</b>: покупатель не перешёл на редирект\n"
-        f"inv: <code>{inv}</code>\ncode: <code>{html_escape(code)}</code>\nтовар: {html_escape(product)}"
-    )
-    if not await telegram.send_message(text, silent=True):
-        logger.warning(f"[GGSEL-SALES] уведомление не ушло inv={inv}")

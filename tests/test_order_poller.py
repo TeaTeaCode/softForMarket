@@ -41,7 +41,7 @@ def poll():
     async def _poll(rows, status, notified_ok=True, already_notified=False, send_ok=True):
         sent, saved = [], []
 
-        async def send(message, silent=False):
+        async def send(message, silent=True):  # дефолт как в TelegramApi
             sent.append((message, silent))
             return send_ok
 
@@ -55,32 +55,35 @@ def poll():
             patch.object(background.repo, "try_mark_notified", AsyncMock(return_value=notified_ok)),
             patch.object(background.repo, "is_notified", AsyncMock(return_value=already_notified)),
             patch.object(background.repo, "unmark_notified", AsyncMock()) as unmark,
+            patch.object(background.repo, "mark_order_done", AsyncMock()) as mark_done,
             patch.object(background.telegram, "send_message", AsyncMock(side_effect=send)),
             patch.object(registry.fragment, "get_task_status", AsyncMock(return_value=status)),
             patch.object(registry.smm_panel, "get_supplier_status", AsyncMock(return_value=status)),
         ):
             await background._poll_orders_once()
             _poll.unmark = unmark
+            _poll.mark_done = mark_done
         return sent, saved
 
     return _poll
 
 
-async def test_final_status_notifies_and_saves(poll):
+async def test_done_status_closes_order_without_notification(poll):
     sent, saved = await poll([order()], {"status": "success"})
 
-    assert len(sent) == 1
-    assert sent[0][0].startswith("✅ ЗАКАЗ ВЫПОЛНЕН")
-    assert sent[0][1] is True  # успех — тихо
+    assert sent == []
     assert saved and json.loads(saved[0][1]) == {"status": "success"}
+    poll.mark_done.assert_awaited_once()
+    poll.unmark.assert_not_awaited()  # метка final остаётся — повторно не придём
 
 
-async def test_failed_status_notifies_loudly(poll):
+async def test_failed_status_notifies_silently(poll):
     sent, _ = await poll([order()], {"status": "failed", "error_text": "нет средств"})
 
     assert len(sent) == 1
-    assert sent[0][0].startswith("❌ ЗАКАЗ ОТМЕНЁН")
-    assert sent[0][1] is False
+    assert sent[0][0].startswith("<b>❌ ЗАКАЗ ОТМЕНЁН</b>")
+    assert sent[0][1] is True
+    poll.mark_done.assert_awaited_once()
 
 
 @pytest.mark.parametrize("status", ["pending", "processing", "awaiting_balance"])
@@ -102,15 +105,15 @@ async def test_already_final_and_notified_order_is_not_polled(poll):
 
 async def test_final_status_without_notification_is_resent(poll):
     """Статус успел сохраниться, а уведомление — нет: заказ нельзя считать закрытым."""
-    row = order(supplier_status=json.dumps({"status": "success"}))
-    sent, _ = await poll([row], {"status": "success"}, already_notified=False)
+    row = order(supplier_status=json.dumps({"status": "failed"}))
+    sent, _ = await poll([row], {"status": "failed"}, already_notified=False)
 
     assert len(sent) == 1
-    assert sent[0][0].startswith("✅ ЗАКАЗ ВЫПОЛНЕН")
+    assert sent[0][0].startswith("<b>❌ ЗАКАЗ ОТМЕНЁН</b>")
 
 
 async def test_failed_send_unmarks_notified(poll):
-    sent, _ = await poll([order()], {"status": "success"}, send_ok=False)
+    sent, _ = await poll([order()], {"status": "failed"}, send_ok=False)
 
     assert len(sent) == 1  # попытка была
     poll.unmark.assert_awaited_once()
@@ -118,7 +121,7 @@ async def test_failed_send_unmarks_notified(poll):
 
 
 async def test_successful_send_keeps_notified_mark(poll):
-    await poll([order()], {"status": "success"}, send_ok=True)
+    await poll([order()], {"status": "failed"}, send_ok=True)
 
     poll.unmark.assert_not_awaited()
 
@@ -132,7 +135,7 @@ async def test_stale_order_is_dropped(poll):
 
 
 async def test_already_notified_order_does_not_resend(poll):
-    sent, saved = await poll([order()], {"status": "success"}, notified_ok=False)
+    sent, saved = await poll([order()], {"status": "failed"}, notified_ok=False)
 
     assert sent == []
     assert saved  # статус всё равно сохраняем
@@ -140,15 +143,15 @@ async def test_already_notified_order_does_not_resend(poll):
 
 async def test_smm_panel_order_polled_too(poll):
     row = order(supplier="smm_panel", supplier_order_id="smm-1", goods_id="102084952", platform="ggsel")
-    sent, _ = await poll([row], {"status": "completed"})
+    sent, _ = await poll([row], {"status": "canceled"})
 
     assert len(sent) == 1
-    assert sent[0][0].startswith("✅ ЗАКАЗ ВЫПОЛНЕН")
+    assert sent[0][0].startswith("<b>❌ ЗАКАЗ ОТМЕНЁН</b>")
 
 
 async def test_broken_row_does_not_stop_the_batch(poll):
     rows = [order(unique_code=""), order(unique_code="CODE-2")]
-    sent, _ = await poll(rows, {"status": "success"})
+    sent, _ = await poll(rows, {"status": "failed"})
 
     # первая строка пропущена, вторая обработана
     assert len(sent) == 1
@@ -157,7 +160,7 @@ async def test_broken_row_does_not_stop_the_batch(poll):
 async def test_supplier_error_does_not_stop_the_batch():
     sent = []
 
-    async def send(message, silent=False):
+    async def send(message, silent=True):
         sent.append(message)
         return True
 
@@ -168,9 +171,10 @@ async def test_supplier_error_does_not_stop_the_batch():
         patch.object(background.repo, "get_pending_orders", AsyncMock(return_value=rows)),
         patch.object(background.repo, "update_supplier_by_ucode", AsyncMock()),
         patch.object(background.repo, "try_mark_notified", AsyncMock(return_value=True)),
+        patch.object(background.repo, "mark_order_done", AsyncMock()),
         patch.object(background.telegram, "send_message", AsyncMock(side_effect=send)),
         patch.object(registry.fragment, "get_task_status", AsyncMock(side_effect=RuntimeError("сеть"))),
-        patch.object(registry.smm_panel, "get_supplier_status", AsyncMock(return_value={"status": "completed"})),
+        patch.object(registry.smm_panel, "get_supplier_status", AsyncMock(return_value={"status": "canceled"})),
     ):
         await background._poll_orders_once()
 

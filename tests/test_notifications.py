@@ -3,7 +3,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.clients.suppliers import registry
-from app.clients.telegram.formatting import status_header_ru
+from app.clients.telegram.client import TelegramApi
+from app.clients.telegram.formatting import is_done, status_header_ru
 from app.services import background
 from app.services.orders import _common as common
 
@@ -25,8 +26,8 @@ def sent():
 def notify(sent):
     """Прогон _notify с перехватом отправки в TG."""
 
-    async def _notify(text, silent=False, dedupe=None, already_notified=False):
-        async def send(message, silent=False):
+    async def _notify(text, dedupe=None, already_notified=False):
+        async def send(message, silent=True):  # дефолт как в TelegramApi
             sent.append((message, silent))
             return True
 
@@ -34,19 +35,14 @@ def notify(sent):
             patch.object(common.repo, "try_mark_notified", AsyncMock(return_value=not already_notified)),
             patch.object(common.telegram, "send_message", AsyncMock(side_effect=send)),
         ):
-            await common._notify(None, text, silent=silent, dedupe=dedupe)
+            await common._notify(None, text, dedupe=dedupe)
 
     return _notify
 
 
-async def test_notify_sends_message(notify, sent):
+async def test_notify_sends_silently(notify, sent):
     await notify("привет")
-    assert sent == [("привет", False)]
-
-
-async def test_notify_passes_silent_flag(notify, sent):
-    await notify("тихо", silent=True)
-    assert sent == [("тихо", True)]
+    assert sent == [("привет", True)]
 
 
 async def test_notify_dedupe_blocks_repeat(notify, sent):
@@ -56,7 +52,7 @@ async def test_notify_dedupe_blocks_repeat(notify, sent):
 
 async def test_notify_dedupe_allows_first_send(notify, sent):
     await notify("первый", dedupe=("CODE-1", "fail"))
-    assert sent == [("первый", False)]
+    assert sent == [("первый", True)]
 
 
 async def test_notify_survives_telegram_failure():
@@ -96,7 +92,7 @@ async def test_notify_keeps_dedupe_when_send_succeeds():
 
 
 async def _run_status_check(supplier, status, sent):
-    async def send(message, silent=False):
+    async def send(message, silent=True):
         sent.append((message, silent))
         return True
 
@@ -117,22 +113,33 @@ async def _run_status_check(supplier, status, sent):
 
 
 @pytest.mark.parametrize(
-    "supplier,status,header,silent",
+    "supplier,status",
     [
-        ("fragment", {"status": "success"}, "✅ ЗАКАЗ ВЫПОЛНЕН", True),
-        ("fragment", {"status": "failed", "error_text": "нет средств"}, "❌ ЗАКАЗ ОТМЕНЁН", False),
-        ("smm_panel", {"status": "completed"}, "✅ ЗАКАЗ ВЫПОЛНЕН", True),
-        ("smm_panel", {"status": "canceled"}, "❌ ЗАКАЗ ОТМЕНЁН", False),
-        ("teateagram", {"status": "completed"}, "✅ ЗАКАЗ ВЫПОЛНЕН", True),
+        ("fragment", {"status": "failed", "error_text": "нет средств"}),
+        ("smm_panel", {"status": "canceled"}),
     ],
 )
-async def test_status_check_notifies_on_final_status(sent, supplier, status, header, silent):
+async def test_status_check_notifies_on_cancel(sent, supplier, status):
     await _run_status_check(supplier, status, sent)
 
     assert len(sent) == 1, "должно уйти ровно одно уведомление"
     message, is_silent = sent[0]
-    assert message.startswith(header)
-    assert is_silent is silent
+    assert message.startswith("<b>❌ ЗАКАЗ ОТМЕНЁН</b>")
+    assert is_silent is True
+
+
+@pytest.mark.parametrize(
+    "supplier,status",
+    [
+        ("fragment", {"status": "success"}),
+        ("smm_panel", {"status": "completed"}),
+        ("teateagram", {"status": "completed"}),
+    ],
+)
+async def test_status_check_skips_done_notification(sent, supplier, status):
+    await _run_status_check(supplier, status, sent)
+
+    assert sent == []
 
 
 @pytest.mark.parametrize(
@@ -147,7 +154,7 @@ async def test_status_check_notifies_on_intermediate_status(sent, status, header
     # заказ ещё в работе — шлём под ключом started, финал потом дошлёт поллер
     await _run_status_check("fragment", {"status": status}, sent)
     assert len(sent) == 1
-    assert sent[0][0].startswith(header)
+    assert sent[0][0].startswith(f"<b>{header}</b>")
 
 
 async def test_status_check_does_not_notify_twice(sent):
@@ -209,14 +216,14 @@ async def test_order_notified_once_across_check_and_poller(sent):
         with patch.object(registry.fragment, "get_task_status", AsyncMock(return_value={"status": "processing"})):
             await background._status_check("GGSEL", "CODE-1", "task-1", {}, "", "Товар", [], {}, "fragment")
         assert len(sent) == 1
-        assert sent[0][0].startswith("👌 ЗАКАЗ В ПРОЦЕССЕ ВЫПОЛНЕНИЯ")
+        assert sent[0][0].startswith("<b>👌 ЗАКАЗ В ПРОЦЕССЕ ВЫПОЛНЕНИЯ</b>")
         assert ("CODE-1", "started") in notified
 
         # 2) промежуточное не заняло ключ final — поллер уведомляет о финале
         with patch.object(registry.fragment, "get_task_status", AsyncMock(return_value={"status": "failed"})):
             await background._poll_orders_once()
         assert len(sent) == 2
-        assert sent[1][0].startswith("❌ ЗАКАЗ ОТМЕНЁН")
+        assert sent[1][0].startswith("<b>❌ ЗАКАЗ ОТМЕНЁН</b>")
 
         # 3) следующий цикл поллера не дублирует финал
         with patch.object(registry.fragment, "get_task_status", AsyncMock(return_value={"status": "failed"})):
@@ -336,3 +343,47 @@ async def test_outbox_status_check_contains_purchase_lookup_failure():
 )
 def test_status_header(status, expected):
     assert status_header_ru(status) == expected
+
+
+@pytest.mark.parametrize(
+    "status,expected",
+    [
+        ({"status": "success"}, True),
+        ({"status": "COMPLETED"}, True),
+        ({"status": "completed", "error": "boom"}, False),  # ошибка важнее статуса
+        ({"status": "partial"}, False),
+        ({"status": "failed"}, False),
+        ({"status": "processing"}, False),
+        (None, False),
+        ("completed", False),
+    ],
+)
+def test_is_done(status, expected):
+    assert is_done(status) is expected
+
+
+# ─── Звук уведомлений ────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("kwargs,expected", [({}, True), ({"silent": False}, False)])
+async def test_telegram_is_silent_by_default(kwargs, expected):
+    api = TelegramApi([None])
+    with patch.object(api._clients[0], "request", AsyncMock()) as request:
+        assert await api.send_message("текст", **kwargs) is True
+
+    assert request.await_args.kwargs["json_data"]["disable_notification"] is expected
+
+
+async def test_buyer_chat_message_is_loud():
+    chat = {"id_i": 42, "email": "b@x.ru"}
+    msg = {"id": 1, "message": "где заказ?", "buyer": 1, "seller": 1}
+    with (
+        patch.object(background.repo, "ggsel_chat_get_last_msg_id", AsyncMock(return_value=0)),
+        patch.object(background.repo, "ggsel_chat_set_last_msg_id", AsyncMock()),
+        patch.object(background.ggsel, "get_chat_messages", AsyncMock(return_value=[msg])),
+        patch.object(background.telegram, "send_message", AsyncMock(return_value=True)) as send,
+    ):
+        await background._process_chat(None, "tok", chat)
+
+    send.assert_awaited_once()
+    assert send.await_args.kwargs == {"silent": False}
