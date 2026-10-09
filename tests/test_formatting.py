@@ -40,11 +40,10 @@ def test_order_message_layout():
             "<b>Оплата:</b> 25.50 RUB · выплата 22.00 RUB · 0.31 USD",
             "<b>Количество:</b> 500",
             "<b>Заказ поставщика:</b> <code>417</code>",
-            "<b>Статус поставщика:</b> in progress · выполнено 100 из 500",
             "<b>Параметры:</b>",
             "— Ссылка: https://t.me/+abc",
             "— Услуга: Обычные подписчики - 3 дня",
-            f'<a href="{URL}">Страница статуса</a>',
+            f'<b>Проверка статуса:</b> <a href="{URL}">{URL}</a>',
         ]
     )
 
@@ -60,7 +59,7 @@ def test_failure_message_shares_layout_and_leads_with_error():
     order_lines = order_msg().split("\n")
     for line in ("<b>Товар:</b>", "<b>Invoice:</b>", "<b>UniqueCode:</b>", "<b>Оплата:</b>", "<b>Количество:</b>"):
         assert next(x for x in lines if x.startswith(line)) == next(x for x in order_lines if x.startswith(line))
-    assert lines[-1] == f'<a href="{URL}">Страница статуса</a>'
+    assert lines[-1] == f'<b>Проверка статуса:</b> <a href="{URL}">{URL}</a>'
 
 
 def test_empty_fields_are_skipped():
@@ -72,7 +71,7 @@ def test_empty_fields_are_skipped():
         "",
         "<b>Ошибка:</b> сеть",
         "<b>UniqueCode:</b> <code>CODE</code>",
-        f'<a href="{URL}">Страница статуса</a>',
+        f'<b>Проверка статуса:</b> <a href="{URL}">{URL}</a>',
     ]
 
 

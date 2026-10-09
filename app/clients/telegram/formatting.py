@@ -93,7 +93,7 @@ def is_done(status_json: Any) -> bool:
 #
 # <b>Поле:</b> значение   (пустые поля пропускаются)
 # <b>Параметры:</b> опции заказа
-# ссылка на страницу статуса
+# <b>Проверка статуса:</b> ссылка
 
 FAIL_HEADER = "❌ ЗАКАЗ НЕ ОФОРМЛЕН"
 CHAT_HEADER = "💬 НОВОЕ СООБЩЕНИЕ"
@@ -132,7 +132,7 @@ def _compose(
     if opts := options_to_lines(options or []):
         lines += ["<b>Параметры:</b>", opts]
     if status_url:
-        lines.append(f'<a href="{status_url}">Страница статуса</a>')
+        lines.append(f'<b>Проверка статуса:</b> <a href="{status_url}">{status_url}</a>')
     return "\n".join(lines)
 
 
@@ -145,23 +145,6 @@ def _order_fields(p: dict[str, Any], unique_code: str, email: str, goods_name: s
         ("Оплата", _payment(p)),
         ("Количество", html_escape(p.get("cnt_goods")).strip() or None),
     ]
-
-
-def _supplier_status(status_info: dict[str, Any]) -> str:
-    parts = [str(status_info.get("status", "")).strip() or "—"]
-    total = status_info.get("total_count")
-    completed = status_info.get("completed_count")
-    remaining = status_info.get("remaining_count")
-    if total is not None and completed is not None:
-        parts.append(f"выполнено {completed} из {total}")
-    if remaining not in (None, 0, "0"):
-        parts.append(f"осталось {remaining}")
-    # TeaTeaGram (старые заказы): поля добавляем только если они есть
-    for key, label in (("charge", "charge"), ("remains", "remains"), ("start_count", "start")):
-        val = str(status_info.get(key, "") or "").strip()
-        if val:
-            parts.append(f"{label}={val}")
-    return html_escape(" · ".join(parts))
 
 
 def fmt_unified_order_msg(
@@ -179,7 +162,6 @@ def fmt_unified_order_msg(
     fields = [
         *_order_fields(p, unique_code, email, goods_name),
         ("Заказ поставщика", _code(order_id)),
-        ("Статус поставщика", _supplier_status(status_info) if status_info else None),
     ]
     return _compose(status_header_ru(status_info), platform_name, fields, options, status_url)
 
