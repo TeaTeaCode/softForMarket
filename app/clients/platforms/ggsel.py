@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 from loguru import logger
 
-from app.clients.base import BaseApi
+from app.clients.base import RETRY_STATUSES, BaseApi
 from app.core.config.settings import settings
 
 GGSEL_BASE = "https://seller.ggsel.com"
@@ -43,7 +43,8 @@ def _token_expiry(token: str, now: float) -> float:
 
 class GgselApi(BaseApi):
     def __init__(self, proxy: str | None = None) -> None:
-        super().__init__(proxy=proxy)
+        # 429 не повторяем через секунду — это лишь добавляет запросов к лимиту; ждём следующего цикла
+        super().__init__(proxy=proxy, retry_statuses=RETRY_STATUSES - {429})
         self._token: str | None = None
         self._expiry = 0.0
         self._lock = asyncio.Lock()

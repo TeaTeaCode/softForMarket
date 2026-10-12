@@ -1,6 +1,7 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
 import json
+import time
 from typing import Any
 
 import httpx
@@ -37,6 +38,16 @@ def poll_delay(interval: int, fails: int) -> int:
 
 def is_rate_limited(e: Exception) -> bool:
     return isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 429
+
+
+def retry_after(e: Exception) -> int:
+    """Сколько секунд просит подождать GGSEL в ответе 429 (Retry-After), 0 — не указано."""
+    if not isinstance(e, httpx.HTTPStatusError) or not is_rate_limited(e):
+        return 0
+    try:
+        return max(0, int(e.response.headers.get("Retry-After", 0)))
+    except ValueError:
+        return 0
 
 
 async def stop_all() -> None:
@@ -303,18 +314,22 @@ def start_chat_poller() -> None:
 
 
 async def _chat_poller() -> None:
-    logger.info(f"[GGSEL-CHAT] поллер запущен, интервал={settings.GGSEL_CHAT_POLL_INTERVAL}с")
+    logger.info(
+        f"[GGSEL-CHAT] поллер запущен, интервал={settings.GGSEL_CHAT_POLL_INTERVAL}с, "
+        f"полный проход раз в {settings.GGSEL_CHAT_FULL_SCAN_INTERVAL}с"
+    )
     await asyncio.sleep(3)
     fails = 0
     while True:
+        delay = settings.GGSEL_CHAT_POLL_INTERVAL
         try:
             await _poll_once()
             fails = 0
         except Exception as e:
             fails += 1
-            delay = poll_delay(settings.GGSEL_CHAT_POLL_INTERVAL, fails)
+            delay = max(poll_delay(settings.GGSEL_CHAT_POLL_INTERVAL, fails), retry_after(e))
             logger.warning(f"[GGSEL-CHAT] ошибка цикла ({fails} подряд), следующий через {delay}с: {e}")
-        await asyncio.sleep(poll_delay(settings.GGSEL_CHAT_POLL_INTERVAL, fails))
+        await asyncio.sleep(delay)
 
 
 def _extract_chat_id(chat: dict[str, Any]) -> int | None:
@@ -345,12 +360,22 @@ def _is_chat_fresh(chat: dict[str, Any]) -> bool:
 
 # id_i → last_message чата, уже полностью переданного в TG: без изменений сообщения не запрашиваем
 _chat_seen: dict[int, str] = {}
+# время последнего успешного полного прохода (monotonic)
+_full_scan_at: float | None = None
+
+
+def _full_scan_due() -> bool:
+    """Полный проход по всем чатам (~7 страниц) — редко; в остальных циклах только непрочитанные."""
+    interval = settings.GGSEL_CHAT_FULL_SCAN_INTERVAL
+    return interval <= 0 or _full_scan_at is None or time.monotonic() - _full_scan_at >= interval
 
 
 async def _poll_once() -> None:
+    global _full_scan_at
+    full = _full_scan_due()
     token = await ggsel.get_token()
     for page in range(1, settings.GGSEL_CHAT_MAX_PAGES + 1):
-        data = await ggsel.get_chats(token, filter_new=0, page=page)
+        data = await ggsel.get_chats(token, filter_new=0 if full else 1, page=page)
         items = data.get("items") or []
         if not items:
             break
@@ -369,6 +394,8 @@ async def _poll_once() -> None:
                     if is_rate_limited(e):
                         raise  # лимит GGSEL — остальные чаты в этом цикле не трогаем
                     logger.warning(f"[GGSEL-CHAT] ошибка чата: {type(e).__name__}: {e}")
+    if full:
+        _full_scan_at = time.monotonic()
 
 
 def _is_from_buyer(msg: dict[str, Any]) -> bool:

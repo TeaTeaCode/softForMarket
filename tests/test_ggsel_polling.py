@@ -1,15 +1,57 @@
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
 
+from app.clients.base import BaseApi
+from app.clients.platforms.ggsel import GgselApi
 from app.services import background
 
 
-def http_error(status: int) -> httpx.HTTPStatusError:
+def http_error(status: int, headers: dict[str, str] | None = None) -> httpx.HTTPStatusError:
     request = httpx.Request("GET", "https://seller.ggsel.com/x")
-    return httpx.HTTPStatusError("err", request=request, response=httpx.Response(status, request=request))
+    response = httpx.Response(status, request=request, headers=headers)
+    return httpx.HTTPStatusError("err", request=request, response=response)
+
+
+# ─── 429 от GGSEL ────────────────────────────────────────────────────────────
+
+
+async def count_requests_on_429(api: BaseApi) -> int:
+    request = httpx.Request("GET", "https://seller.ggsel.com/x")
+    send = AsyncMock(return_value=httpx.Response(429, request=request))
+    with (
+        patch.object(api._client, "request", send),
+        patch("app.clients.base.asyncio.sleep", AsyncMock()),
+        pytest.raises(httpx.HTTPStatusError),
+    ):
+        await api.request("GET", "https://seller.ggsel.com/x")
+    return send.await_count
+
+
+async def test_ggsel_does_not_retry_rate_limit():
+    # повтор через 0.5–2 с только добавлял запросов к исчерпанному лимиту
+    assert await count_requests_on_429(GgselApi()) == 1
+
+
+async def test_other_clients_still_retry_rate_limit():
+    assert await count_requests_on_429(BaseApi()) == 4
+
+
+@pytest.mark.parametrize(
+    "error,expected",
+    [
+        (http_error(429, {"Retry-After": "120"}), 120),
+        (http_error(429), 0),
+        (http_error(429, {"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}), 0),
+        (http_error(500, {"Retry-After": "120"}), 0),
+        (RuntimeError("сеть"), 0),
+    ],
+)
+def test_retry_after(error, expected):
+    assert background.retry_after(error) == expected
 
 
 # ─── пауза между циклами ─────────────────────────────────────────────────────
@@ -39,14 +81,16 @@ def chat(id_i, last_message=None):
 
 
 @pytest.fixture(autouse=True)
-def clean_seen():
+def clean_state():
     background._chat_seen.clear()
+    background._full_scan_at = None
     yield
     background._chat_seen.clear()
+    background._full_scan_at = None
 
 
-async def poll_chats(items, process):
-    pages = AsyncMock(side_effect=lambda token, filter_new, page: {"items": items if page == 1 else []})
+async def poll_chats(items, process, pages=None):
+    pages = pages or AsyncMock(side_effect=lambda token, filter_new, page: {"items": items if page == 1 else []})
     with (
         patch.object(background.ggsel, "get_token", AsyncMock(return_value="tok")),
         patch.object(background.ggsel, "get_chats", pages),
@@ -54,6 +98,46 @@ async def poll_chats(items, process):
         patch.object(background, "_process_chat", process),
     ):
         await background._poll_once()
+    return pages
+
+
+def filters(pages):
+    """filter_new первой страницы каждого цикла."""
+    return [c.kwargs["filter_new"] for c in pages.await_args_list if c.kwargs["page"] == 1]
+
+
+async def test_full_scan_then_only_unread_chats(monkeypatch):
+    monkeypatch.setattr(background.settings, "GGSEL_CHAT_FULL_SCAN_INTERVAL", 600)
+    pages = AsyncMock(return_value={"items": []})
+    now = [0.0]
+    # подменяем только часы модуля: time.monotonic нужен ещё и event loop
+    monkeypatch.setattr(background, "time", SimpleNamespace(monotonic=lambda: now[0]))
+
+    for now[0] in (1000.0, 1010.0, 1300.0, 1700.0):
+        await poll_chats([], AsyncMock(), pages)
+
+    # старт → полный; через 10 с и 300 с — только непрочитанные; через 700 с — снова полный
+    assert filters(pages) == [0, 1, 1, 0]
+
+
+async def test_failed_full_scan_is_repeated(monkeypatch):
+    monkeypatch.setattr(background.settings, "GGSEL_CHAT_FULL_SCAN_INTERVAL", 600)
+    failing = AsyncMock(side_effect=http_error(429))
+    with pytest.raises(httpx.HTTPStatusError):
+        await poll_chats([], AsyncMock(), failing)
+
+    pages = await poll_chats([], AsyncMock())
+    assert filters(pages) == [0]  # прерванный полный проход не засчитан
+
+
+async def test_zero_interval_keeps_full_scan_every_cycle(monkeypatch):
+    monkeypatch.setattr(background.settings, "GGSEL_CHAT_FULL_SCAN_INTERVAL", 0)
+    pages = AsyncMock(return_value={"items": []})
+
+    for _ in range(3):
+        await poll_chats([], AsyncMock(), pages)
+
+    assert filters(pages) == [0, 0, 0]
 
 
 async def test_unchanged_chat_is_not_refetched():
