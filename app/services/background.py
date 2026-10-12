@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 import json
 from typing import Any
 
+import httpx
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +23,20 @@ _tasks: set[asyncio.Task] = set()
 def _track(task: asyncio.Task) -> None:
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)
+
+
+POLL_BACKOFF_MAX = 300
+
+
+def poll_delay(interval: int, fails: int) -> int:
+    """Пауза до следующего цикла: при ошибках подряд растёт вдвое, но не дольше 5 минут."""
+    if fails <= 0:
+        return interval
+    return max(interval, min(interval << min(fails, 10), POLL_BACKOFF_MAX))
+
+
+def is_rate_limited(e: Exception) -> bool:
+    return isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 429
 
 
 async def stop_all() -> None:
@@ -290,12 +305,16 @@ def start_chat_poller() -> None:
 async def _chat_poller() -> None:
     logger.info(f"[GGSEL-CHAT] поллер запущен, интервал={settings.GGSEL_CHAT_POLL_INTERVAL}с")
     await asyncio.sleep(3)
+    fails = 0
     while True:
         try:
             await _poll_once()
+            fails = 0
         except Exception as e:
-            logger.warning(f"[GGSEL-CHAT] ошибка цикла: {e}")
-        await asyncio.sleep(settings.GGSEL_CHAT_POLL_INTERVAL)
+            fails += 1
+            delay = poll_delay(settings.GGSEL_CHAT_POLL_INTERVAL, fails)
+            logger.warning(f"[GGSEL-CHAT] ошибка цикла ({fails} подряд), следующий через {delay}с: {e}")
+        await asyncio.sleep(poll_delay(settings.GGSEL_CHAT_POLL_INTERVAL, fails))
 
 
 def _extract_chat_id(chat: dict[str, Any]) -> int | None:
@@ -324,6 +343,10 @@ def _is_chat_fresh(chat: dict[str, Any]) -> bool:
     return last >= threshold
 
 
+# id_i → last_message чата, уже полностью переданного в TG: без изменений сообщения не запрашиваем
+_chat_seen: dict[int, str] = {}
+
+
 async def _poll_once() -> None:
     token = await ggsel.get_token()
     for page in range(1, settings.GGSEL_CHAT_MAX_PAGES + 1):
@@ -335,9 +358,16 @@ async def _poll_once() -> None:
             for chat in items:
                 if not _is_chat_fresh(chat):
                     continue
+                chat_id = _extract_chat_id(chat)
+                marker = str(chat.get("last_message") or "")
+                if chat_id and marker and _chat_seen.get(chat_id) == marker:
+                    continue
                 try:
-                    await _process_chat(session, token, chat)
+                    if await _process_chat(session, token, chat) and chat_id and marker:
+                        _chat_seen[chat_id] = marker
                 except Exception as e:
+                    if is_rate_limited(e):
+                        raise  # лимит GGSEL — остальные чаты в этом цикле не трогаем
                     logger.warning(f"[GGSEL-CHAT] ошибка чата: {type(e).__name__}: {e}")
 
 
@@ -350,10 +380,11 @@ def _is_from_buyer(msg: dict[str, Any]) -> bool:
     return bool(int(msg.get("buyer") or 0) or int(msg.get("seller") or 0))
 
 
-async def _process_chat(session: AsyncSession, token: str, chat: dict[str, Any]) -> None:
+async def _process_chat(session: AsyncSession, token: str, chat: dict[str, Any]) -> bool:
+    """Пересылает новые сообщения покупателя. False — часть не ушла в TG, повторим в следующем цикле."""
     chat_id = _extract_chat_id(chat)
     if not chat_id:
-        return
+        return True
     last_id = await repo.ggsel_chat_get_last_msg_id(session, chat_id)
     first_seen = last_id is None
 
@@ -361,7 +392,7 @@ async def _process_chat(session: AsyncSession, token: str, chat: dict[str, Any])
     if not msgs:
         if first_seen:
             await repo.ggsel_chat_set_last_msg_id(session, chat_id, 0)
-        return
+        return True
 
     msgs_sorted = sorted((m for m in msgs if m.get("id") is not None), key=lambda m: int(m.get("id") or 0))
 
@@ -378,7 +409,7 @@ async def _process_chat(session: AsyncSession, token: str, chat: dict[str, Any])
     if first_seen and settings.GGSEL_CHAT_BOOTSTRAP_SILENT:
         await repo.ggsel_chat_set_last_msg_id(session, chat_id, max_seen)
         logger.info(f"[GGSEL-CHAT] bootstrap chat_id={chat_id} last_msg_id={max_seen} (пропущено {len(to_send)} сообщений)")
-        return
+        return True
 
     email = chat.get("email") or chat.get("buyer_email") or "—"
     first_failed: int | None = None
@@ -404,3 +435,4 @@ async def _process_chat(session: AsyncSession, token: str, chat: dict[str, Any])
 
     if new_last > (last_id or 0):
         await repo.ggsel_chat_set_last_msg_id(session, chat_id, new_last)
+    return first_failed is None
