@@ -1,7 +1,11 @@
+import asyncio
+import base64
 import hashlib
+import json
 import time
 from typing import Any
 
+import httpx
 from loguru import logger
 
 from app.clients.base import BaseApi
@@ -27,16 +31,45 @@ def _auth_headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}", "locale": "ru"}
 
 
+def _token_expiry(token: str, now: float) -> float:
+    """Когда обновить токен: за час до exp из JWT (живёт ~31 день), иначе через час."""
+    try:
+        payload = token.split(".")[1]
+        exp = float(json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))["exp"])
+    except (IndexError, KeyError, TypeError, ValueError):
+        return now + 3600
+    return max(now, exp - 3600)
+
+
 class GgselApi(BaseApi):
+    def __init__(self, proxy: str | None = None) -> None:
+        super().__init__(proxy=proxy)
+        self._token: str | None = None
+        self._expiry = 0.0
+        self._lock = asyncio.Lock()
+
+    async def request(self, *args: Any, **kwargs: Any) -> Any:
+        try:
+            return await super().request(*args, **kwargs)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code in (401, 403):
+                self._token = None  # протух или отозван — следующий вызов залогинится заново
+            raise
+
     async def get_token(self) -> str:
-        ts_ms = int(time.time() * 1000)
-        sign = hashlib.sha256((settings.GGSEL_API_KEY.get_secret_value() + str(ts_ms)).encode()).hexdigest()
-        payload = {"timestamp": ts_ms, "sign": sign, "seller_id": settings.GGSEL_SELLER_ID}
-        data = await self.request("POST", GGSEL_LOGIN_URL, json_data=payload)
-        if data.get("retval") != 0 or "token" not in data:
-            raise RuntimeError(f"Ошибка логина GGSEL: {data}")
-        token_value: str = data["token"]
-        return token_value
+        async with self._lock:
+            now = time.time()
+            if self._token and now < self._expiry:
+                return self._token
+            ts_ms = int(now * 1000)
+            sign = hashlib.sha256((settings.GGSEL_API_KEY.get_secret_value() + str(ts_ms)).encode()).hexdigest()
+            payload = {"timestamp": ts_ms, "sign": sign, "seller_id": settings.GGSEL_SELLER_ID}
+            data = await self.request("POST", GGSEL_LOGIN_URL, json_data=payload)
+            if data.get("retval") != 0 or "token" not in data:
+                raise RuntimeError(f"Ошибка логина GGSEL: retval={data.get('retval')} {data.get('retdesc', '')}")
+            token_value: str = data["token"]
+            self._token, self._expiry = token_value, _token_expiry(token_value, now)
+            return token_value
 
     async def get_purchase(self, code: str) -> dict[str, Any]:
         token = await self.get_token()
