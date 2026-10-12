@@ -1,10 +1,29 @@
 import logging
 from pathlib import Path
+import re
 import sys
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from app.core.config.config import config
+
+if TYPE_CHECKING:
+    from loguru import Record
+
+# токены не пишем в лог: GGSEL и Digiseller передают их в URL, Telegram — в пути запроса
+_SECRETS = (
+    (re.compile(r"eyJ[\w-]+\.[\w-]+\.[\w-]+"), "***"),  # JWT
+    (re.compile(r"(token=)[^&\s'\"]+"), r"\1***"),
+    (re.compile(r"(/bot)\d+:[\w-]+"), r"\1***"),
+)
+
+
+def mask_secrets(record: "Record") -> None:
+    message = record["message"]
+    for pattern, repl in _SECRETS:
+        message = pattern.sub(repl, message)
+    record["message"] = message
 
 
 class InterceptHandler(logging.Handler):
@@ -46,6 +65,7 @@ def setup_logging(file_override: Path | None = None) -> None:
         logging.getLogger(name).propagate = True
 
     logger.configure(
+        patcher=mask_secrets,
         handlers=[
             {
                 "sink": sys.stdout,
@@ -66,5 +86,5 @@ def setup_logging(file_override: Path | None = None) -> None:
                 "diagnose": log_config.diagnose,
                 "enqueue": log_config.enqueue,
             },
-        ]
+        ],
     )
