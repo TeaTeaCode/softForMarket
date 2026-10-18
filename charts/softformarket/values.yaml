@@ -4,7 +4,8 @@ image:
   tag: ""            # пусто = берём appVersion чарта
   pullPolicy: IfNotPresent
 
-imagePullSecrets: []
+imagePullSecrets:
+  - name: ghcr-credentials
 nameOverride: ""
 fullnameOverride: ""
 

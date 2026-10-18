@@ -192,6 +192,8 @@ backend/pyrightconfig copy.json
 
 boost_services.yaml
 config.yaml
+# но несекретный чарт-config (только logging) нужен в репозитории для сборки чарта
+!charts/softformarket/files/config.yaml
 check.sh
 test/
 audit.yaml
