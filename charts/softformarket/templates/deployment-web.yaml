@@ -1,0 +1,90 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "softformarket.fullname" . }}-web
+  labels:
+    {{- include "softformarket.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  replicas: {{ .Values.web.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: web
+  template:
+    metadata:
+      labels:
+        {{- include "softformarket.labels" . | nindent 8 }}
+        app.kubernetes.io/component: web
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.migration.enabled }}
+      # Миграции до старта web. При нескольких репликах initContainer выполнится
+      # в каждой, но `alembic upgrade head` идемпотентен (повторный запуск ничего
+      # не делает), а параллельный старт реплик web в k8s не одновременный.
+      initContainers:
+        - name: migrate
+          image: {{ include "softformarket.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["sh", "-c", {{ .Values.migration.command | quote }}]
+          envFrom:
+            - secretRef:
+                name: {{ include "softformarket.secretName" . }}
+          env:
+            {{- include "softformarket.env" . | nindent 12 }}
+          volumeMounts:
+            {{- include "softformarket.configVolumeMounts" . | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+      {{- end }}
+      containers:
+        - name: web
+          image: {{ include "softformarket.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # Только uvicorn: миграции вынесены в initContainer (в образе CMD их
+          # гонит сам — здесь команду переопределяем).
+          command:
+            - sh
+            - -c
+            - exec uvicorn app.main:app --host 0.0.0.0 --port {{ .Values.web.port }} --workers {{ .Values.web.workers }} --proxy-headers --forwarded-allow-ips='*'
+          ports:
+            - name: http
+              containerPort: {{ .Values.web.port }}
+          envFrom:
+            - secretRef:
+                name: {{ include "softformarket.secretName" . }}
+          env:
+            {{- include "softformarket.env" . | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.web.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "softformarket.configVolumeMounts" . | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+      volumes:
+        {{- include "softformarket.configVolume" . | nindent 8 }}

@@ -1,0 +1,37 @@
+name: promote-prod
+
+# Выкатка softForMarket в prod: только вручную и с подтверждением ревьюера
+# (GitHub Environment "prod"). В test уезжает само при push в main.
+# Сама выкатка — запись версии chart в ../infra, дальше применяет Argo CD.
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Компонент softForMarket"
+        required: true
+        type: choice
+        options:
+          - softformarket
+      version:
+        description: "Версия chart, например 0.1.1. Пусто — взять ту, что сейчас в test."
+        required: false
+        type: string
+
+concurrency:
+  group: promote-prod-${{ inputs.service }}
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Promote to prod
+        uses: ./.github/actions/deploy-prod
+        with:
+          service: ${{ inputs.service }}
+          version: ${{ inputs.version || 'from-test' }}
+          app-id: ${{ secrets.INFRA_APP_ID }}
+          private-key: ${{ secrets.INFRA_APP_PRIVATE_KEY }}

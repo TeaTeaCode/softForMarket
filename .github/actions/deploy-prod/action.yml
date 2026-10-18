@@ -1,0 +1,39 @@
+name: deploy-prod
+description: >-
+  Записывает опубликованную версию chart сервиса в TeaTeaCode/infra
+  (product/prod/apps/<service>.yml). Дальше выкатывает Argo CD.
+
+inputs:
+  service:
+    description: Имя сервиса, совпадает с именем файла в product/prod/apps.
+    required: true
+  version:
+    description: >-
+      Версия chart и образа, X.Y.Z. Или from-test: взять ту, что сейчас
+      выкачена в test.
+    required: true
+  app-id:
+    description: ID GitHub App с записью в репозиторий infra.
+    required: true
+  private-key:
+    description: Приватный ключ этой GitHub App.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # Токен живёт около часа и действует только на репозиторий infra.
+    - name: Get infra token
+      id: infra-token
+      uses: actions/create-github-app-token@v1
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: TeaTeaCode
+        repositories: infra
+
+    - name: Write prod version to infra
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.infra-token.outputs.token }}
+      run: bash scripts/deploy-prod.sh "${{ inputs.service }}" "${{ inputs.version }}"

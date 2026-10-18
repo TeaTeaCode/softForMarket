@@ -1,0 +1,9 @@
+apiVersion: v2
+name: softformarket
+description: >-
+  softForMarket в кластере: web (FastAPI — приём callback площадок GGSEL/Digiseller
+  и страница статуса) и worker (поллеры заказов/чатов + outbox-доставка) на одном
+  образе, плюс init-контейнер миграций Alembic. nginx не входит — его роль у ingress.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

@@ -1,0 +1,37 @@
+name: deploy-test
+description: >-
+  Записывает опубликованную версию chart сервиса в TeaTeaCode/infra
+  (product/test/apps/<service>.yml). Дальше выкатывает Argo CD.
+
+inputs:
+  service:
+    description: Имя сервиса, совпадает с именем файла в product/test/apps.
+    required: true
+  version:
+    description: Опубликованная версия chart и образа, X.Y.Z.
+    required: true
+  app-id:
+    description: ID GitHub App с записью в репозиторий infra.
+    required: true
+  private-key:
+    description: Приватный ключ этой GitHub App.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # Токен живёт около часа и действует только на репозиторий infra.
+    - name: Get infra token
+      id: infra-token
+      uses: actions/create-github-app-token@v1
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: TeaTeaCode
+        repositories: infra
+
+    - name: Write test version to infra
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.infra-token.outputs.token }}
+      run: bash scripts/deploy-test.sh "${{ inputs.service }}" "${{ inputs.version }}"

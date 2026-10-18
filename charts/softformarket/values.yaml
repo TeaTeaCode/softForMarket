@@ -1,0 +1,134 @@
+image:
+  registry: ghcr.io
+  repository: teateacode/softformarket/images/app
+  tag: ""            # пусто = берём appVersion чарта
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+podSecurityContext: {}
+securityContext: {}
+nodeSelector: {}
+tolerations: []
+
+# Миграции Alembic — отдельным init-контейнером web (не в CMD образа), чтобы при
+# нескольких репликах web не было гонки параллельных `alembic upgrade head`.
+migration:
+  enabled: true
+  command: "alembic upgrade head"
+
+# web — FastAPI :8000. Принимает callback площадок и отдаёт /status, /health.
+web:
+  replicaCount: 2
+  port: 8000
+  workers: 2
+  resources: {}
+
+# worker — поллеры GGSEL/заказов + outbox-доставка. СИНГЛТОН: ровно 1 реплика
+# (поллеры не координируются между процессами). worker.enabled=false выключает
+# фон целиком — на случай безопасного старта до переключения.
+worker:
+  enabled: true
+  replicaCount: 1
+  resources: {}
+
+service:
+  type: ClusterIP
+
+# ingress выключен по умолчанию. Включается в ../infra с реальным доменом
+# (площадкам GGSEL/PLATI нужен адрес callback, клиенту — страница /status).
+ingress:
+  enabled: false
+  className: nginx
+  host: ""
+  tlsSecret: softformarket-tls
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+
+# Несекретные переменные окружения. Секреты — отдельно через ExternalSecret (Vault).
+# Значения по умолчанию = prod; test переопределяет их в ../infra.
+config:
+  PROJECT_NAME: "softForMarket"
+  SERVER_HOST: "0.0.0.0"
+  SERVER_PORT: "8000"
+  USE_HTTPS: "false"
+  SSL_CHAIN_PATH: ""
+  SSL_KEY_PATH: ""
+  ALGORITHM: "HS256"
+  ACCESS_TOKEN_EXPIRE_MINUTES: "60"
+  BACKEND_CORS_ORIGINS: "[]"
+  # ПЕРЕОПРЕДЕЛИТЬ в ../infra реальным доменом (test и prod).
+  BASE_PUBLIC_URL: "https://example.com"
+  # Postgres (пароль — в Vault). test переопределяет host/db/user в ../infra.
+  POSTGRES_HOST: "postgresql-prod"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "softformarket_prod"
+  POSTGRES_USER: "softformarket_prod_user"
+  POSTGRES_SCHEMA: "marketplace"
+  # Telegram-уведомления (TG_BOT_TOKEN и TG_PROXY_URL — в Vault).
+  TG_CHAT_ID: "-100123456789"
+  TG_PROXY_ENABLED: "false"
+  # GGSEL / Digiseller (ключи — в Vault).
+  GGSEL_SELLER_ID: "123456"
+  DIGI_SELLER_ID: "123456"
+  # Поставщики. SMM Panel — это наша панель (gaba external-api) в кластере.
+  # ПЕРЕОПРЕДЕЛИТЬ в ../infra точным адресом/портом gaba external-api.
+  SMM_PANEL_BASE_URL: "http://gaba-backend-external-api.prod.svc.cluster.local:8010"
+  # Fragment — сервис FragmentSoft; адрес уточним, когда он поедет в кластер.
+  FRAGMENT_BASE_URL: "https://fragment.example.com"
+  # Поведение / интервалы поллеров.
+  AUTO_MARK_DELIVERED: "false"
+  INFLIGHT_TTL_SECONDS: "600"
+  STATUS_CHECK_DELAY_SECONDS: "60"
+  GGSEL_CHAT_POLL_INTERVAL: "15"
+  GGSEL_CHAT_BOOTSTRAP_SILENT: "false"
+  GGSEL_CHAT_MAX_PAGES: "10"
+  GGSEL_CHAT_FRESH_DAYS: "1"
+  GGSEL_SALES_POLL_INTERVAL: "60"
+  GGSEL_SALES_POLL_TOP: "50"
+  GGSEL_SALES_MIN_AGE_SECONDS: "300"
+  GGSEL_SALES_MAX_AGE_HOURS: "24"
+  ORDER_POLL_INTERVAL: "60"
+  ORDER_POLL_BATCH: "200"
+  ORDER_POLL_MAX_AGE_HOURS: "48"
+  OUTBOX_POLL_INTERVAL: "1"
+  OUTBOX_BATCH_SIZE: "50"
+  OUTBOX_MAX_CONCURRENCY: "10"
+  OUTBOX_LEASE_SECONDS: "180"
+  OUTBOX_SHUTDOWN_GRACE_SECONDS: "30"
+  OUTBOX_BACKOFF_BASE: "2"
+  OUTBOX_BACKOFF_MAX: "300"
+  OUTBOX_CLEANUP_INTERVAL: "3600"
+  OUTBOX_CLEANUP_RETENTION_DAYS: "3"
+  WORKERS: "2"
+
+# Несекретные YAML-конфиги (логирование + каталог товаров) из charts/.../files.
+# Монтируются по subPath в /app/config, поверх испечённых в образ .example.
+configFiles:
+  enabled: true
+  mountPath: /app/config
+  items:
+    - config.yaml
+    - services.yaml
+
+# Секреты из Vault через External Secrets Operator. Имя ключа = имя переменной
+# окружения. vaultPath — путь секрета в Vault (<env>/softformarket).
+externalSecrets:
+  enabled: true
+  vaultPath: prod/softformarket
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-prod
+    kind: ClusterSecretStore
+  keys:
+    - SECRET_KEY
+    - POSTGRES_PASSWORD
+    - TG_BOT_TOKEN
+    - TG_PROXY_URL
+    - GGSEL_API_KEY
+    - DIGI_API_KEY
+    - TEA_API_KEY
+    - SMM_PANEL_API_KEY
+    - FRAGMENT_API_KEY

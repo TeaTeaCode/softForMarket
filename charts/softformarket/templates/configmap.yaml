@@ -1,0 +1,16 @@
+{{- if .Values.configFiles.enabled }}
+# Несекретные YAML-конфиги: логирование (config.yaml) и каталог товаров
+# (services.yaml). Основа — charts/softformarket/files/*.yaml. Секретов тут нет:
+# боевые ключи приходят из Secret как переменные окружения.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "softformarket.configMapName" . }}
+  labels:
+    {{- include "softformarket.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+{{ .Files.Get "files/config.yaml" | indent 4 }}
+  services.yaml: |
+{{ .Files.Get "files/services.yaml" | indent 4 }}
+{{- end }}

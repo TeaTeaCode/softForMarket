@@ -1,0 +1,31 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "softformarket.fullname" . }}
+  labels:
+    {{- include "softformarket.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host | quote }}
+      secretName: {{ .Values.ingress.tlsSecret }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          # Роуты softForMarket без префикса (/ggsel, /digiseller-callback,
+          # /status, /health) — всё на web.
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "softformarket.fullname" . }}
+                port:
+                  number: {{ .Values.web.port }}
+{{- end }}
