@@ -30,6 +30,12 @@ def _trim(value: Any) -> str:
     return text if len(text) <= LOG_BODY_LIMIT else f"{text[:LOG_BODY_LIMIT]}…(+{len(text) - LOG_BODY_LIMIT})"
 
 
+def _rate_limit_headers(r: httpx.Response) -> str:
+    """Заголовки лимита из ответа 429 — по ним видно, сколько и как долго ждать."""
+    found = {k: v for k, v in r.headers.items() if k.lower() == "retry-after" or "ratelimit" in k.lower()}
+    return f" {found}" if found else ""
+
+
 class BaseApi:
     def __init__(
         self,
@@ -38,10 +44,12 @@ class BaseApi:
         headers: dict[str, str] | None = None,
         proxy: str | None = None,
         transport_retry_total: int = TRANSPORT_RETRY_TOTAL,
+        retry_statuses: frozenset[int] = RETRY_STATUSES,
     ) -> None:
         if transport_retry_total < 0:
             raise ValueError("transport_retry_total must not be negative")
         self._transport_retry_total = transport_retry_total
+        self._retry_statuses = retry_statuses
         merged_headers = {**DEFAULT_HEADERS, **(headers or {})}
         self._client = httpx.AsyncClient(
             base_url=base_url or "",
@@ -102,7 +110,7 @@ class BaseApi:
                 r = await self._client.request(method, url, params=params, json=json_data, data=data, headers=headers)
                 took = (time.monotonic() - started) * 1000
                 logger.debug(f"[HTTP] ← {method} {url} {r.status_code} за {took:.0f}мс body={_trim(r.text)}")
-                if r.status_code in RETRY_STATUSES and attempt < retry_total:
+                if r.status_code in self._retry_statuses and attempt < retry_total:
                     logger.debug(f"Ретрай {attempt + 1}/{retry_total}: {method} {url} -> {r.status_code} {r.text[:200]}")
                     last_response = r
                     await asyncio.sleep(RETRY_BACKOFF * (2**attempt))
@@ -110,8 +118,10 @@ class BaseApi:
                 r.raise_for_status()
                 return r
             except httpx.HTTPStatusError as exc:
+                limits = _rate_limit_headers(exc.response) if exc.response.status_code == 429 else ""
                 logger.error(
-                    f"Сервис вернул ошибку: {method} {exc.request.url} -> {exc.response.status_code} {exc.response.text[:200]}"
+                    f"Сервис вернул ошибку: {method} {exc.request.url} -> {exc.response.status_code}{limits} "
+                    f"{exc.response.text[:200]}"
                 )
                 raise
             except (httpx.TransportError, httpx.TimeoutException) as exc:

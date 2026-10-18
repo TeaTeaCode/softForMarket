@@ -83,6 +83,8 @@ class Settings(BaseSettings):
     GGSEL_CHAT_MAX_PAGES: int
     # Тянем чат, только если last_message не старше N дней
     GGSEL_CHAT_FRESH_DAYS: int
+    # Полный проход по всем чатам раз в N секунд; между ними — только непрочитанные. 0 — всегда полный
+    GGSEL_CHAT_FULL_SCAN_INTERVAL: int = 600
 
     # Поллер статусов заказов: интервал опроса, сек
     ORDER_POLL_INTERVAL: int
