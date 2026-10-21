@@ -32,17 +32,12 @@ def start_sales_poller() -> None:
 async def _sales_poller() -> None:
     logger.info(f"[GGSEL-SALES] поллер запущен, интервал={settings.GGSEL_SALES_POLL_INTERVAL}с")
     await asyncio.sleep(10)
-    fails = 0
     while True:
-        delay = settings.GGSEL_SALES_POLL_INTERVAL
         try:
             await poll_sales_once()
-            fails = 0
         except Exception as e:
-            fails += 1
-            delay = max(background.poll_delay(settings.GGSEL_SALES_POLL_INTERVAL, fails), background.retry_after(e))
-            logger.warning(f"[GGSEL-SALES] ошибка цикла ({fails} подряд), следующий через {delay}с: {type(e).__name__}: {e}")
-        await asyncio.sleep(delay)
+            logger.warning(f"[GGSEL-SALES] ошибка цикла: {type(e).__name__}: {e}")
+        await asyncio.sleep(settings.GGSEL_SALES_POLL_INTERVAL)
 
 
 def _sale_in_window(sale: dict[str, Any], now: datetime) -> bool:
