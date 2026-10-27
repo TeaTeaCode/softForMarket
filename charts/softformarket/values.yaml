@@ -74,7 +74,9 @@ config:
   # GGSEL / Digiseller (ключи — в Vault).
   GGSEL_SELLER_ID: "123456"
   DIGI_SELLER_ID: "123456"
-  # Поставщики. SMM Panel — это наша панель (gaba external-api) в кластере.
+  # Поставщики: teateagram (socpanel) | smm_panel (gaba).
+  ORDER_SUPPLIER: "teateagram"
+  # SMM Panel — это наша панель (gaba external-api) в кластере.
   # ПЕРЕОПРЕДЕЛИТЬ в ../infra точным адресом/портом gaba external-api.
   SMM_PANEL_BASE_URL: "http://gaba-backend-external-api.prod.svc.cluster.local:8010"
   # Fragment — сервис FragmentSoft; адрес уточним, когда он поедет в кластер.

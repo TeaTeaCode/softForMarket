@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.platforms.ggsel import ggsel
 from app.clients.suppliers.fragment import Source
+from app.clients.suppliers.registry import resolve_supplier_service
 from app.clients.telegram import formatting as fmt
 from app.core.config.config import config
 from app.db import repository as repo
@@ -19,10 +20,11 @@ from app.services.orders._common import (
     _quantity,
     _save_error,
     _save_invalid_link,
+    _service_error,
     status_url,
 )
 from app.services.orders.fragment import process_fragment
-from app.services.outbox.producer import queue_smm_panel_purchase
+from app.services.outbox.producer import queue_supplier_purchase
 
 
 async def process_ggsel(session: AsyncSession, unique_code: str) -> str:
@@ -69,9 +71,10 @@ async def process_ggsel(session: AsyncSession, unique_code: str) -> str:
             return unique_code
 
         service_id = resolve_service("ggsel", goods_id, days, variant_ids)
-        logger.info(f"[GGSEL] → маршрут SMM Panel code={unique_code} service={service_id}")
-        if not service_id:
-            err = f"Не удалось определить service_id (goods_id={goods_id}, days={days}, variants={variant_ids})"
+        supplier, supplier_service = resolve_supplier_service(service_id)
+        logger.info(f"[GGSEL] → маршрут {supplier} code={unique_code} service={service_id} → {supplier_service}")
+        if supplier_service is None:
+            err = _service_error(service_id, supplier, goods_id, days, variant_ids)
             logger.error(f"[GGSEL] ✖ отказ code={unique_code}: {err}")
             await _save_error(session, "ggsel", unique_code, data, goods_id, email, link, days, quantity, err)
             await _notify(
@@ -114,23 +117,25 @@ async def process_ggsel(session: AsyncSession, unique_code: str) -> str:
             None,
             "OUTBOX_PENDING",
         )
-        purchase_row["supplier"] = "smm_panel"
+        purchase_row["supplier"] = supplier
         purchase_row["service"] = service_id
-        queued = await queue_smm_panel_purchase(
+        queued = await queue_supplier_purchase(
             session,
             purchase_values=purchase_row,
             source="ggsel",
             order_key=unique_code,
-            service_name=service_id,
+            supplier=supplier,
+            service=supplier_service,
             url=str(norm_link),
-            total_count=quantity,
+            quantity=quantity,
         )
         if queued is None:
             logger.info(f"[GGSEL] ⏭ Outbox уже содержит заказ code={unique_code}")
             return unique_code
         logger.success(
             f"[GGSEL] ✔ заказ поставлен в Outbox code={unique_code} inv={inv} «{goods_name}» "
-            f"service={service_id} link={norm_link} qty={quantity} outbox_id={queued.outbox_id}"
+            f"supplier={supplier} service={service_id} → {supplier_service} link={norm_link} qty={quantity} "
+            f"outbox_id={queued.outbox_id}"
         )
         return unique_code
     except Exception as e:

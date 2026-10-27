@@ -1,5 +1,5 @@
 import json
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import SecretStr, computed_field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -61,10 +61,13 @@ class Settings(BaseSettings):
     DIGI_SELLER_ID: str
     DIGI_API_KEY: SecretStr
 
-    # TeaTeaGram: legacy, только статусы старых заказов
+    # Поставщик новых заказов
+    ORDER_SUPPLIER: Literal["teateagram", "smm_panel"] = "teateagram"
+
+    # Поставщик TeaTeaGram (socpanel)
     TEA_API_KEY: SecretStr
 
-    # Поставщик SMM Panel
+    # Поставщик SMM Panel (gaba)
     SMM_PANEL_BASE_URL: str
     SMM_PANEL_API_KEY: SecretStr
 

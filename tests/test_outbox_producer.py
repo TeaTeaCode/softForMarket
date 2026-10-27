@@ -1,10 +1,11 @@
+from pydantic import ValidationError
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config.settings import settings
 from app.db.models import Base, OutboxMessage, Purchase
-from app.services.outbox.producer import enqueue_smm_panel_purchase, queue_smm_panel_purchase
+from app.services.outbox.producer import enqueue_supplier_purchase, queue_supplier_purchase
 
 
 @pytest.fixture
@@ -37,14 +38,15 @@ def purchase_values():
 
 async def test_purchase_and_outbox_are_created_in_one_transaction(sessions):
     async with sessions() as session:
-        queued = await queue_smm_panel_purchase(
+        queued = await queue_supplier_purchase(
             session,
             purchase_values=purchase_values(),
             source="ggsel",
             order_key="CODE-1",
-            service_name="G_BOOST_90",
+            supplier="smm_panel",
+            service="G_BOOST_90",
             url="https://t.me/example",
-            total_count=2,
+            quantity=2,
         )
 
     assert queued is not None
@@ -67,14 +69,15 @@ async def test_transaction_rolls_back_purchase_and_outbox_together(sessions):
     with pytest.raises(RuntimeError, match="abort"):
         async with sessions() as session:
             async with session.begin():
-                await enqueue_smm_panel_purchase(
+                await enqueue_supplier_purchase(
                     session,
                     purchase_values=purchase_values(),
                     source="ggsel",
                     order_key="CODE-1",
-                    service_name="G_BOOST_90",
+                    supplier="smm_panel",
+                    service="G_BOOST_90",
                     url="https://t.me/example",
-                    total_count=2,
+                    quantity=2,
                 )
                 raise RuntimeError("abort")
 
@@ -85,24 +88,26 @@ async def test_transaction_rolls_back_purchase_and_outbox_together(sessions):
 
 async def test_duplicate_outbox_key_does_not_create_second_purchase(sessions):
     async with sessions() as session:
-        first = await queue_smm_panel_purchase(
+        first = await queue_supplier_purchase(
             session,
             purchase_values=purchase_values(),
             source="ggsel",
             order_key="CODE-1",
-            service_name="G_BOOST_90",
+            supplier="smm_panel",
+            service="G_BOOST_90",
             url="https://t.me/example",
-            total_count=2,
+            quantity=2,
         )
     async with sessions() as session:
-        duplicate = await queue_smm_panel_purchase(
+        duplicate = await queue_supplier_purchase(
             session,
             purchase_values=purchase_values(),
             source="ggsel",
             order_key="CODE-1",
-            service_name="G_BOOST_90",
+            supplier="smm_panel",
+            service="G_BOOST_90",
             url="https://t.me/example",
-            total_count=2,
+            quantity=2,
         )
 
     assert first is not None
@@ -110,3 +115,46 @@ async def test_duplicate_outbox_key_does_not_create_second_purchase(sessions):
     async with sessions() as session:
         assert await session.scalar(select(func.count()).select_from(Purchase)) == 1
         assert await session.scalar(select(func.count()).select_from(OutboxMessage)) == 1
+
+
+async def test_teateagram_purchase_stores_socpanel_contract(sessions):
+    async with sessions() as session:
+        queued = await queue_supplier_purchase(
+            session,
+            purchase_values=purchase_values(),
+            source="ggsel",
+            order_key="CODE-1",
+            supplier="teateagram",
+            service=114,
+            url="https://t.me/example",
+            quantity=2,
+        )
+
+    assert queued is not None
+    async with sessions() as session:
+        purchase = await session.get(Purchase, queued.purchase_id)
+        message = await session.get(OutboxMessage, queued.outbox_id)
+    assert purchase is not None
+    assert purchase.supplier == "teateagram"
+    assert message is not None
+    assert message.supplier == "teateagram"
+    assert message.payload == {"purchase_id": purchase.id, "service": 114, "link": "https://t.me/example", "quantity": 2}
+
+
+async def test_teateagram_rejects_service_name_instead_of_id(sessions):
+    with pytest.raises(ValidationError):
+        async with sessions() as session:
+            await queue_supplier_purchase(
+                session,
+                purchase_values=purchase_values(),
+                source="ggsel",
+                order_key="CODE-1",
+                supplier="teateagram",
+                service="G_BOOST_90",
+                url="https://t.me/example",
+                quantity=2,
+            )
+
+    async with sessions() as session:
+        assert await session.scalar(select(func.count()).select_from(Purchase)) == 0
+        assert await session.scalar(select(func.count()).select_from(OutboxMessage)) == 0

@@ -383,11 +383,12 @@ async def test_missing_purchase_rolls_back_outbox_completion(sessions):
 
     with pytest.raises(RuntimeError, match="Purchase 999"):
         async with sessions.begin() as session:
-            await outbox_repo.complete_smm_panel_delivery(
+            await outbox_repo.complete_supplier_delivery(
                 session,
                 event.id,
                 event.lease_token,
                 purchase_id=999,
+                supplier="smm_panel",
                 supplier_order_id="417",
             )
 
@@ -415,7 +416,7 @@ async def test_missing_purchase_rolls_back_outbox_failure(sessions):
 
     with pytest.raises(RuntimeError, match="Purchase 999"):
         async with sessions.begin() as session:
-            await outbox_repo.complete_smm_panel_failure(
+            await outbox_repo.complete_supplier_failure(
                 session,
                 event.id,
                 event.lease_token,
@@ -451,11 +452,12 @@ async def test_stale_success_does_not_change_purchase(sessions):
         await session.execute(update(OutboxMessage).where(OutboxMessage.id == event.id).values(lease_token="newer-lease"))
 
     async with sessions.begin() as session:
-        updated = await outbox_repo.complete_smm_panel_delivery(
+        updated = await outbox_repo.complete_supplier_delivery(
             session,
             event.id,
             event.lease_token,
             purchase_id,
+            "smm_panel",
             "417",
         )
 
@@ -487,7 +489,7 @@ async def test_stale_dead_result_does_not_change_purchase(sessions):
         await session.execute(update(OutboxMessage).where(OutboxMessage.id == event.id).values(lease_token="newer-lease"))
 
     async with sessions.begin() as session:
-        updated = await outbox_repo.complete_smm_panel_failure(
+        updated = await outbox_repo.complete_supplier_failure(
             session,
             event.id,
             event.lease_token,

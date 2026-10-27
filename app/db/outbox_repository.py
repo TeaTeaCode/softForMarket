@@ -120,17 +120,18 @@ async def mark_delivered(session: AsyncSession, event_id: int, lease_token: str)
     return (await session.execute(statement)).scalar_one_or_none() is not None
 
 
-async def complete_smm_panel_delivery(
+async def complete_supplier_delivery(
     session: AsyncSession,
     event_id: int,
     lease_token: str,
     purchase_id: int,
+    supplier: str,
     supplier_order_id: str,
 ) -> bool:
     if not await mark_delivered(session, event_id, lease_token):
         return False
     values = {
-        "supplier": "smm_panel",
+        "supplier": supplier,
         "supplier_order_id": supplier_order_id,
         "status": "SUPPLIER_ACCEPTED",
     }
@@ -140,7 +141,7 @@ async def complete_smm_panel_delivery(
     return True
 
 
-async def complete_smm_panel_failure(
+async def complete_supplier_failure(
     session: AsyncSession,
     event_id: int,
     lease_token: str,

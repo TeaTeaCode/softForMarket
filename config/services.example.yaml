@@ -42,13 +42,13 @@ fragment_products:
 
 # количество дней → service_name поставщика
 days_to_service:
-  180: "G_BOOST_180"  # было TeaTeaGram 115
-  90: "G_BOOST_90"    # было 114
-  60: "G_BOOST_60"    # было 138
-  30: "G_BOOST_30"    # было 71
-  14: "G_BOOST_14"    # было 144
-  7: "G_BOOST_7"      # было 143
-  1: "G_BOOST_1"      # было 77
+  180: "G_BOOST_180"
+  90: "G_BOOST_90"
+  60: "G_BOOST_60"
+  30: "G_BOOST_30"
+  14: "G_BOOST_14"
+  7: "G_BOOST_7"
+  1: "G_BOOST_1"
 
 # площадка → {variant_id варианта оффера → service_name поставщика}
 variant_to_service:
@@ -94,6 +94,32 @@ variant_to_service:
     "35064845": "G_PREM_SUB_60"
     "35064846": "G_PREM_SUB_90"
     "35064848": "G_PREM_SUB_180"
+
+# service_name → id услуги socpanel
+teateagram_service_ids:
+  G_BOOST_1: 77
+  G_BOOST_7: 143
+  G_BOOST_14: 144
+  G_BOOST_30: 71
+  G_BOOST_60: 138
+  G_BOOST_90: 114
+  G_BOOST_180: 115
+  G_SUB_3: 19
+  G_SUB_7: 20
+  G_SUB_30: 21
+  G_SUB_90: 171
+  G_SUB_180: 55
+  G_PREM_SUB_3: 79
+  G_PREM_SUB_7: 78
+  G_PREM_SUB_10: 75
+  G_PREM_SUB_15: 70
+  G_PREM_SUB_20: 107
+  G_PREM_SUB_25: 74
+  G_PREM_SUB_30: 111
+  G_PREM_SUB_45: 98
+  G_PREM_SUB_60: 99
+  G_PREM_SUB_90: 100
+  G_PREM_SUB_180: 73
 
 # площадка → footer на странице статуса
 footer_by_platform:

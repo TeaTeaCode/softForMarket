@@ -4,6 +4,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.clients.suppliers.fragment import Source
+from app.clients.suppliers.smm_panel import smm_panel
+from app.clients.suppliers.teateagram import teateagram
+from app.core.config.settings import settings
 from app.services.orders import _common as common, digiseller as digi_orders, fragment as fragment_orders
 from app.services.orders.digiseller import process_digiseller
 
@@ -41,6 +44,7 @@ class Run:
         self.saved_orders = []
         self.stars = None
         self.premium = None
+        self.status_supplier = None
 
     @property
     def row(self):
@@ -52,16 +56,26 @@ class Run:
         return json.loads(self.row["supplier_status"])["message"]
 
 
+# свои id, а не из локального services.yaml
+SOCPANEL_IDS = {"G_BOOST_90": 114, "G_SUB_3": 9003, "G_PREM_SUB_30": 9530, "G_PREM_SUB_180": 73}
+
+
 @pytest.fixture
-def run():
+def run(monkeypatch):
+    monkeypatch.setattr(settings, "ORDER_SUPPLIER", "teateagram")
+    monkeypatch.setattr(digi_orders.config.services, "teateagram_service_ids", SOCPANEL_IDS)
+
     async def _run(data, *, is_processed=False, lock_free=True, supplier_resp=None, supplier_error=None, username_ok=True):
         r = Run()
 
-        async def smm(service, link, qty):
-            r.smm = (service, link, qty)
-            if supplier_error:
-                raise supplier_error
-            return supplier_resp if supplier_resp is not None else {"order": "smm-1"}
+        def supplier_call(name):
+            async def call(service, link, qty):
+                r.smm = (name, service, link, qty)
+                if supplier_error:
+                    raise supplier_error
+                return supplier_resp if supplier_resp is not None else {"order": "smm-1"}
+
+            return call
 
         async def stars(username, quantity, source):
             r.stars = (username, quantity, source)
@@ -93,7 +107,8 @@ def run():
             patch.object(common.repo, "try_mark_notified", AsyncMock(return_value=True)),
             patch.object(common.telegram, "send_message", AsyncMock(return_value=True)),
             patch.object(digi_orders.digiseller, "get_purchase", AsyncMock(return_value=data)),
-            patch.object(digi_orders.smm_panel, "create_supplier_order", AsyncMock(side_effect=smm)),
+            patch.object(teateagram, "create_supplier_order", AsyncMock(side_effect=supplier_call("teateagram"))),
+            patch.object(smm_panel, "create_supplier_order", AsyncMock(side_effect=supplier_call("smm_panel"))),
             patch.object(fragment_orders.repo, "insert_purchase", AsyncMock(side_effect=lambda s, row: r.rows.append(row))),
             patch.object(fragment_orders.fragment, "check_username", AsyncMock(return_value=username_ok)),
             patch.object(fragment_orders.fragment, "create_stars_order", AsyncMock(side_effect=stars)),
@@ -101,12 +116,12 @@ def run():
             patch.object(
                 digi_orders.background,
                 "schedule_status_check",
-                lambda *a, **k: r.scheduled.append(a[2]),
+                lambda *a, **k: (r.scheduled.append(a[2]), setattr(r, "status_supplier", k.get("supplier"))),
             ),
             patch.object(
                 fragment_orders.background,
                 "schedule_status_check",
-                lambda *a, **k: r.scheduled.append(a[2]),
+                lambda *a, **k: (r.scheduled.append(a[2]), setattr(r, "status_supplier", k.get("supplier"))),
             ),
         ):
             await process_digiseller(None, "CODE-D")
@@ -118,10 +133,12 @@ def run():
 async def test_order_accepted(run):
     r = await run(purchase())
 
-    assert r.smm == ("G_BOOST_90", "https://t.me/mychannel", 1)
+    assert r.smm == ("teateagram", 114, "https://t.me/mychannel", 1)
     assert r.row["status"] == "SUPPLIER_ACCEPTED"
     assert r.row["platform"] == "digiseller"
-    assert r.row["supplier"] == "smm_panel"
+    assert r.row["supplier"] == "teateagram"
+    assert r.row["service"] == "G_BOOST_90"
+    assert r.status_supplier == "teateagram"
     assert r.row["supplier_order_id"] == "smm-1"
     assert r.scheduled == ["smm-1"]
     assert r.saved_orders == [(777, "smm-1")]
@@ -170,6 +187,25 @@ async def test_invalid_link_rejected(run):
 
     assert r.smm is None
     assert r.row["status"] == "ERROR_INVALID_LINK"
+    assert r.processed == [777]
+
+
+async def test_order_goes_to_gaba_when_switched_back(run, monkeypatch):
+    monkeypatch.setattr(settings, "ORDER_SUPPLIER", "smm_panel")
+    r = await run(purchase())
+
+    assert r.smm == ("smm_panel", "G_BOOST_90", "https://t.me/mychannel", 1)
+    assert r.row["supplier"] == "smm_panel"
+    assert r.status_supplier == "smm_panel"
+
+
+async def test_service_without_socpanel_id_is_rejected(run, monkeypatch):
+    monkeypatch.setattr(digi_orders.config.services, "teateagram_service_ids", {})
+    r = await run(purchase())
+
+    assert r.smm is None
+    assert r.row["status"] == "ERROR"
+    assert "G_BOOST_90" in r.error_message
     assert r.processed == [777]
 
 
@@ -237,10 +273,10 @@ def variant_config(monkeypatch):
         ("Premium subscribers - 180 days", 35064848, "G_PREM_SUB_180"),
     ],
 )
-async def test_subscribers_go_to_smm_panel(run, variant_config, value, variant_id, service):
+async def test_subscribers_go_to_socpanel(run, variant_config, value, variant_id, service):
     r = await run(purchase("6218292", [SUB_LINK_OPT, service_opt(value, variant_id)], cnt_goods="500"))
 
-    assert r.smm == (service, "https://t.me/+abc123xyz", 500)
+    assert r.smm == ("teateagram", SOCPANEL_IDS[service], "https://t.me/+abc123xyz", 500)
     assert r.row["status"] == "SUPPLIER_ACCEPTED"
     assert r.row["service"] == service
 
@@ -249,7 +285,7 @@ async def test_subscribers_routed_by_id_not_by_title(run, variant_config):
     # кнопка переименована в Digiseller — маршрут не меняется
     r = await run(purchase("6218292", [SUB_LINK_OPT, service_opt("Подписчики PRO", 35064843)]))
 
-    assert r.smm[0] == "G_PREM_SUB_30"
+    assert r.smm[1] == SOCPANEL_IDS["G_PREM_SUB_30"]
 
 
 # ─── Fragment (Stars/Premium через PLATI) ────────────────────────────────────
@@ -258,7 +294,7 @@ async def test_subscribers_routed_by_id_not_by_title(run, variant_config):
 async def test_fragment_stars_accepted(run):
     r = await run(purchase(goods_id="5560001", options=[USERNAME_OPT], cnt_goods="50"))
 
-    assert r.smm is None  # ушло в Fragment, а не в SMM Panel
+    assert r.smm is None  # ушло в Fragment
     assert r.stars == ("durov", 50, Source.digiseller)
     assert r.row["status"] == "SUPPLIER_ACCEPTED"
     assert r.row["platform"] == "digiseller"

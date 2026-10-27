@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.platforms.digiseller import digiseller
 from app.clients.suppliers.fragment import Source
-from app.clients.suppliers.smm_panel import smm_panel
+from app.clients.suppliers.registry import create_supplier_order, resolve_supplier_service
 from app.clients.telegram import formatting as fmt
 from app.core.config.config import config
 from app.db import repository as repo
@@ -24,6 +24,7 @@ from app.services.orders._common import (
     _quantity,
     _save_error,
     _save_invalid_link,
+    _service_error,
     status_url,
 )
 from app.services.orders.fragment import process_fragment
@@ -80,8 +81,9 @@ async def process_digiseller(session: AsyncSession, unique_code: str) -> str:
             return unique_code
 
         service_id = resolve_service("plati", goods_id, days, variant_ids)
-        if not service_id:
-            err = f"Не удалось определить service_id (goods_id={goods_id}, days={days}, variants={variant_ids})"
+        supplier_name, supplier_service = resolve_supplier_service(service_id)
+        if supplier_service is None:
+            err = _service_error(service_id, supplier_name, goods_id, days, variant_ids)
             await _save_error(session, "digiseller", unique_code, purchase, goods_id, email, link, days, quantity, err)
             await _notify(
                 session,
@@ -122,7 +124,7 @@ async def process_digiseller(session: AsyncSession, unique_code: str) -> str:
             await _finish_inv(session, inv)
             return unique_code
 
-        supplier = await smm_panel.create_supplier_order(service_id, str(norm_link), quantity)
+        supplier = await create_supplier_order(supplier_name, supplier_service, str(norm_link), quantity)
         order_id = supplier.get("order") or supplier.get("order_id") or supplier.get("id")
         if not order_id:
             err = "Поставщик не вернул order_id"
@@ -165,6 +167,7 @@ async def process_digiseller(session: AsyncSession, unique_code: str) -> str:
                 quantity,
                 str(order_id),
                 "SUPPLIER_ACCEPTED",
+                supplier=supplier_name,
             )
             | {"service": service_id},
         )
@@ -173,7 +176,7 @@ async def process_digiseller(session: AsyncSession, unique_code: str) -> str:
         purchase_meta = dict(purchase)
         purchase_meta["id_goods"] = goods_id
         background.schedule_status_check(
-            "PLATI", unique_code, str(order_id), purchase_meta, email, goods_name, options, supplier
+            "PLATI", unique_code, str(order_id), purchase_meta, email, goods_name, options, supplier, supplier=supplier_name
         )
         return unique_code
     except Exception as e:

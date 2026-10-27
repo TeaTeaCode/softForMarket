@@ -6,6 +6,7 @@ import pytest
 
 from app.clients.suppliers.fragment import Source
 from app.clients.suppliers.smm_panel import smm_panel
+from app.core.config.settings import settings
 from app.services.orders import _common as common, fragment as fragment_orders, ggsel as ggsel_orders
 from app.services.orders.ggsel import process_ggsel
 
@@ -52,8 +53,22 @@ class Run:
         return json.loads(self.row["supplier_status"])["message"]
 
 
+# свои id, а не из локального services.yaml
+SOCPANEL_IDS = {
+    "G_BOOST_90": 114,
+    "G_SUB_3": 9003,
+    "G_SUB_180": 9180,
+    "G_PREM_SUB_10": 9510,
+    "G_PREM_SUB_30": 9530,
+    "G_PREM_SUB_45": 9545,
+}
+
+
 @pytest.fixture
 def run(monkeypatch):
+    monkeypatch.setattr(settings, "ORDER_SUPPLIER", "teateagram")
+    monkeypatch.setattr(ggsel_orders.config.services, "teateagram_service_ids", SOCPANEL_IDS)
+
     async def _run(data, username_ok=True):
         r = Run()
 
@@ -88,7 +103,7 @@ def run(monkeypatch):
             patch.object(fragment_orders.fragment, "create_stars_order", AsyncMock(side_effect=stars)),
             patch.object(fragment_orders.fragment, "create_premium_order", AsyncMock(side_effect=premium)),
             patch.object(smm_panel, "create_supplier_order", AsyncMock(side_effect=smm)),
-            patch.object(ggsel_orders, "queue_smm_panel_purchase", AsyncMock(side_effect=queue_smm)),
+            patch.object(ggsel_orders, "queue_supplier_purchase", AsyncMock(side_effect=queue_smm)),
             patch.object(
                 fragment_orders.background,
                 "schedule_status_check",
@@ -177,25 +192,45 @@ async def test_premium_rejected_on_unsupported_months(run):
 # ─── Бусты (регрессия: Fragment не должен их перехватывать) ──────────────────
 
 
-async def test_boost_still_goes_to_smm_panel(run):
-    data = purchase(
-        "102084952",
-        [{"name": "Ссылка", "value": "https://t.me/mychannel"}, {"name": "Количество дней", "value": "90"}],
-    )
-    r = await run(data)
+BOOST_90 = [{"name": "Ссылка", "value": "https://t.me/mychannel"}, {"name": "Количество дней", "value": "90"}]
+
+
+async def test_boost_goes_to_socpanel(run):
+    r = await run(purchase("102084952", BOOST_90))
 
     assert r.smm is None
     assert r.stars is None and r.premium is None
     assert r.row["status"] == "OUTBOX_PENDING"
-    assert r.row["supplier"] == "smm_panel"
+    assert r.row["supplier"] == "teateagram"
     assert r.row["supplier_order_id"] is None
     assert r.row["days"] == 90
+    assert r.row["service"] == "G_BOOST_90"
     assert r.outbox["source"] == "ggsel"
     assert r.outbox["order_key"] == "CODE-1"
-    assert r.outbox["service_name"] == "G_BOOST_90"
+    assert r.outbox["supplier"] == "teateagram"
+    assert r.outbox["service"] == 114
     assert r.outbox["url"] == "https://t.me/mychannel"
-    assert r.outbox["total_count"] == 1
+    assert r.outbox["quantity"] == 1
     assert r.scheduled == []
+
+
+async def test_boost_goes_to_gaba_when_switched_back(run, monkeypatch):
+    monkeypatch.setattr(settings, "ORDER_SUPPLIER", "smm_panel")
+    r = await run(purchase("102084952", BOOST_90))
+
+    assert r.row["supplier"] == "smm_panel"
+    assert r.outbox["supplier"] == "smm_panel"
+    assert r.outbox["service"] == "G_BOOST_90"
+
+
+async def test_boost_without_socpanel_id_is_rejected(run, monkeypatch):
+    monkeypatch.setattr(ggsel_orders.config.services, "teateagram_service_ids", {})
+    r = await run(purchase("102084952", BOOST_90))
+
+    assert r.outbox is None
+    assert r.row["status"] == "ERROR"
+    assert "G_BOOST_90" in r.error_message
+    assert "teateagram_service_ids" in r.error_message
 
 
 async def test_boost_invalid_link_rejected(run):
@@ -273,23 +308,23 @@ def variant_config(monkeypatch):
         ("Premium subscribers - 10 days", 53479619, "G_PREM_SUB_10", 10),
     ],
 )
-async def test_subscribers_go_to_smm_panel(run, variant_config, value, variant_id, service, days):
+async def test_subscribers_go_to_socpanel(run, variant_config, value, variant_id, service, days):
     r = await run(purchase("103119587", [SUB_LINK_OPT, service_opt(value, variant_id)], cnt="500"))
 
     assert r.stars is None and r.premium is None
     assert r.row["status"] == "OUTBOX_PENDING"
-    assert r.row["supplier"] == "smm_panel"
+    assert r.row["supplier"] == "teateagram"
     assert r.row["days"] == days  # дни из текста — только для БД и логов
-    assert r.outbox["service_name"] == service
+    assert r.outbox["service"] == SOCPANEL_IDS[service]
     assert r.outbox["url"] == "https://t.me/+abc123xyz"
-    assert r.outbox["total_count"] == 500
+    assert r.outbox["quantity"] == 500
 
 
 async def test_subscribers_routed_by_id_not_by_title(run, variant_config):
     # вариант переименован в GGSEL — маршрут не меняется
     r = await run(purchase("103119587", [SUB_LINK_OPT, service_opt("Подписчики PRO", 53479623)]))
 
-    assert r.outbox["service_name"] == "G_PREM_SUB_30"
+    assert r.outbox["service"] == SOCPANEL_IDS["G_PREM_SUB_30"]
 
 
 async def test_subscribers_rejected_on_unknown_variant(run, variant_config):

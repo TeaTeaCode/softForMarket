@@ -29,6 +29,12 @@ async def _notify(session: AsyncSession, text: str, dedupe: tuple[str, str] | No
     logger.info(f"[TG] {'отправлено' if ok else 'НЕ ОТПРАВЛЕНО'} dedupe={dedupe} text={text!r}")
 
 
+def _service_error(service_name: str | None, supplier: str, goods_id: str, days: int | None, variant_ids: list[str]) -> str:
+    if not service_name:
+        return f"Не удалось определить service_id (goods_id={goods_id}, days={days}, variants={variant_ids})"
+    return f"Услуга {service_name} не заведена у поставщика {supplier}: добавьте id в teateagram_service_ids"
+
+
 def _quantity(raw: Any) -> int:
     try:
         return int(float(str(raw or "1").replace(",", ".")))

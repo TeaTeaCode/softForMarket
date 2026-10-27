@@ -16,7 +16,9 @@ async def test_worker_starts_pollers_and_outbox_delivery() -> None:
 
     with (
         patch.object(worker_module, "setup_logging"),
-        patch.object(worker_module, "SmmPanelOutboxDeliverer", return_value=deliverer),
+        patch.object(worker_module, "SmmPanelOutboxDeliverer", return_value="gaba") as gaba_cls,
+        patch.object(worker_module, "TeaTeaGramOutboxDeliverer", return_value="socpanel") as socpanel_cls,
+        patch.object(worker_module, "OutboxRouter", return_value=deliverer) as router_cls,
         patch.object(worker_module, "OutboxWorker", return_value=outbox_worker) as worker_cls,
         patch.object(worker_module.background, "start_chat_poller") as start_chat,
         patch.object(worker_module.background, "start_order_poller") as start_orders,
@@ -35,6 +37,9 @@ async def test_worker_starts_pollers_and_outbox_delivery() -> None:
     ):
         await worker_module._main(stop_event)
 
+    gaba_cls.assert_called_once_with()
+    socpanel_cls.assert_called_once_with()
+    router_cls.assert_called_once_with({"teateagram": "socpanel", "smm_panel": "gaba"})
     args = worker_cls.call_args.args
     assert args[0].poll_interval == settings.OUTBOX_POLL_INTERVAL
     assert args[1] is async_session
@@ -60,7 +65,9 @@ async def test_worker_cleanup_continues_after_outbox_stop_failure() -> None:
 
     with (
         patch.object(worker_module, "setup_logging"),
-        patch.object(worker_module, "SmmPanelOutboxDeliverer", return_value=deliverer),
+        patch.object(worker_module, "SmmPanelOutboxDeliverer"),
+        patch.object(worker_module, "TeaTeaGramOutboxDeliverer"),
+        patch.object(worker_module, "OutboxRouter", return_value=deliverer),
         patch.object(worker_module, "OutboxWorker", return_value=outbox_worker),
         patch.object(worker_module.background, "start_chat_poller"),
         patch.object(worker_module.background, "start_order_poller"),

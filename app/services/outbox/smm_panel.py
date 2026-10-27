@@ -7,9 +7,8 @@ from app.clients.suppliers.smm_panel import SmmPanelApi
 from app.db import outbox_repository as outbox_repo
 from app.db.outbox_repository import DueOutboxMessage
 from app.services import background
-from app.services.outbox.delivery import NonRetryableDeliveryError, OutboxDeliveryResult
+from app.services.outbox.delivery import CREATE_ORDER_ACTION, NonRetryableDeliveryError, OutboxDeliveryResult
 
-CREATE_ORDER_ACTION = "create-supplier-order"
 SMM_PANEL_SUPPLIER = "smm_panel"
 
 
@@ -70,17 +69,18 @@ class SmmPanelOutboxDeliverer:
         payload = self._parse_payload(event.payload)
         if result is None or result.supplier_order_id is None:
             raise RuntimeError("Successful SMM Panel delivery has no supplier order id")
-        return await outbox_repo.complete_smm_panel_delivery(
+        return await outbox_repo.complete_supplier_delivery(
             session,
             event.id,
             event.lease_token,
             payload.purchase_id,
+            SMM_PANEL_SUPPLIER,
             result.supplier_order_id,
         )
 
     async def fail(self, session: AsyncSession, event: DueOutboxMessage, error: str) -> bool:
         reference = self._parse_purchase_reference(event.payload)
-        return await outbox_repo.complete_smm_panel_failure(
+        return await outbox_repo.complete_supplier_failure(
             session,
             event.id,
             event.lease_token,

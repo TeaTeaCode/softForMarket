@@ -5,6 +5,7 @@ import pytest
 
 from app.clients.suppliers.fragment import PREMIUM_MONTHS, FragmentApi, Source
 from app.clients.suppliers.smm_panel import SmmPanelApi
+from app.clients.suppliers.teateagram import TeaTeaGramApi
 
 
 def _api(cls, handler, base_url="https://supplier.test"):
@@ -132,3 +133,28 @@ async def test_existing_smm_panel_call_keeps_base_api_retries():
 
     assert data["order"] == 42
     assert calls == 2
+
+
+# ─── TeaTeaGram (socpanel) ───────────────────────────────────────────────────
+
+
+async def test_teateagram_sends_form_with_numeric_service():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(httpx.QueryParams(request.content.decode()))
+        return httpx.Response(200, json={"order": 23501})
+
+    data = await _api(TeaTeaGramApi, handler).create_supplier_order(114, "https://t.me/chan", 3)
+
+    assert data["order"] == 23501
+    assert seen["action"] == "add"
+    assert seen["service"] == "114"
+    assert seen["link"] == "https://t.me/chan"
+    assert seen["quantity"] == "3"
+
+
+async def test_teateagram_raises_on_error_body():
+    api = _api(TeaTeaGramApi, lambda r: httpx.Response(200, json={"error": "Incorrect service ID"}))
+    with pytest.raises(RuntimeError, match="Incorrect service ID"):
+        await api.create_supplier_order(999, "https://t.me/chan", 1)

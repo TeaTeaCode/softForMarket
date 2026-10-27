@@ -34,6 +34,8 @@ class ServicesConfig(BaseModel):
     days_to_service: dict[int, str]
     # площадка → {variant_id варианта оффера → service_name поставщика}
     variant_to_service: dict[str, dict[str, str]]
+    # service_name → id услуги socpanel
+    teateagram_service_ids: dict[str, int] = {}
     # площадка → footer на странице статуса
     footer_by_platform: dict[str, str]
 

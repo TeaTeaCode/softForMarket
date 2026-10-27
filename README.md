@@ -30,7 +30,8 @@ config/               # config.yaml (логи), services.yaml (товары→у
 ключ SMM Panel (`SMM_PANEL_API_KEY`), SOCKS5-прокси для Telegram, доступ к PostgreSQL.
 Несколько Telegram-прокси задаются через запятую или перенос строки в `TG_PROXY_URL`.
 Формат каждого адреса — `host:port`; явные схемы `socks5://` и `http://` также поддерживаются.
-Каталог товаров — в `config/services.yaml` (маппинг на `service_name` поставщика SMM Panel).
+Каталог товаров и id услуг socpanel (`teateagram_service_ids`) — в `config/services.yaml`.
+Поставщик заказов — `ORDER_SUPPLIER`: `teateagram` (socpanel) или `smm_panel` (gaba).
 
 ## Запуск (Docker)
 

@@ -13,7 +13,9 @@ from app.core.config.settings import settings
 from app.core.logging import setup_logging
 from app.db.session import async_session, engine
 from app.services import background, sales_poller
-from app.services.outbox.smm_panel import SmmPanelOutboxDeliverer
+from app.services.outbox.delivery import OutboxRouter
+from app.services.outbox.smm_panel import SMM_PANEL_SUPPLIER, SmmPanelOutboxDeliverer
+from app.services.outbox.teateagram import TEATEAGRAM_SUPPLIER, TeaTeaGramOutboxDeliverer
 from app.services.outbox.worker import OutboxWorker, OutboxWorkerConfig
 from app.services.worker_signals import install_shutdown_handlers
 
@@ -36,13 +38,16 @@ async def _cleanup(name: str, action: Callable[[], Awaitable[None]]) -> None:
 async def _main(stop_event: asyncio.Event | None = None) -> None:
     setup_logging(config.logging.worker_file)
     logger.info("[WORKER] старт фонового процесса")
-    deliverer: SmmPanelOutboxDeliverer | None = None
+    deliverer: OutboxRouter | None = None
     outbox_worker: OutboxWorker | None = None
     try:
         shutdown_event = stop_event or asyncio.Event()
         if stop_event is None:
             install_shutdown_handlers(shutdown_event)
-        deliverer = SmmPanelOutboxDeliverer()
+        # gaba — для заказов, уже стоящих в очереди
+        deliverer = OutboxRouter(
+            {TEATEAGRAM_SUPPLIER: TeaTeaGramOutboxDeliverer(), SMM_PANEL_SUPPLIER: SmmPanelOutboxDeliverer()}
+        )
         outbox_worker = OutboxWorker(OutboxWorkerConfig.from_settings(settings), async_session, deliverer)
         outbox_worker.start()
         background.start_chat_poller()
@@ -55,7 +60,7 @@ async def _main(stop_event: asyncio.Event | None = None) -> None:
         await _cleanup("фоновых задач", background.stop_all)
         await _cleanup("общих HTTP-клиентов", _close_worker_clients)
         if deliverer is not None:
-            await _cleanup("HTTP-клиента Outbox", deliverer.close)
+            await _cleanup("HTTP-клиентов Outbox", deliverer.close)
         await _cleanup("DB engine", engine.dispose)
 
 
