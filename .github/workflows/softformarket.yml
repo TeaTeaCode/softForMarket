@@ -3,7 +3,7 @@ name: softformarket
 on:
   push:
     branches:
-      - master
+      - develop
     paths:
       - app/**
       - alembic/**
@@ -94,13 +94,13 @@ jobs:
           git add "${{ env.CHART_FILE }}"
           git commit -m "chart(softformarket): release v${{ steps.bump.outputs.version }} [skip ci]"
           for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            git pull --rebase origin master && git push && exit 0
+            git pull --rebase origin develop && git push && exit 0
             echo "push attempt ${attempt} failed, retrying"
             sleep $((attempt * 3))
           done
           exit 1
 
-      # В test версия пишется в ../infra, дальше Argo CD. В prod — только вручную promote-prod.
+      # В test версия пишется в ../infra, дальше Argo CD. В prod — авто при пуше в master (deploy-prod.yml).
       - name: Deploy to test
         uses: ./.github/actions/deploy-test
         with:

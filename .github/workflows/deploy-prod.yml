@@ -1,0 +1,41 @@
+name: deploy-prod
+
+# Авто-выкатка softformarket в prod при пуше в master.
+# Образ и чарт собираются в develop (softformarket.yml) и уезжают в test.
+# При слиянии develop -> master промоутим в prod ту версию, что сейчас в test
+# (from-test): пересборки нет, prod получает ровно проверенное в test.
+# Ручной promote-prod убран; workflow_dispatch оставлен для отката на версию.
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - app/**
+      - alembic/**
+      - config/**
+      - Dockerfile
+      - charts/softformarket/**
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Версия chart X.Y.Z для отката. Пусто — взять из test."
+        required: false
+        type: string
+
+concurrency:
+  group: deploy-prod-softformarket
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Promote softformarket to prod
+        uses: ./.github/actions/deploy-prod
+        with:
+          service: softformarket
+          version: ${{ github.event.inputs.version || 'from-test' }}
+          app-id: ${{ secrets.INFRA_APP_ID }}
+          private-key: ${{ secrets.INFRA_APP_PRIVATE_KEY }}
