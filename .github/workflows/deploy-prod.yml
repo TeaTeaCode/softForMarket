@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   promote:
-    runs-on: ubuntu-latest
+    runs-on: tg-engine-runners
     steps:
       - uses: actions/checkout@v4
 
